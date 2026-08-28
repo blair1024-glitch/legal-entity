@@ -82,20 +82,19 @@ cat <<DONE
 
 ${GREEN}${BOLD}安裝完成。${OFF}
 
-${BOLD}接下來每次要用，先跑這一行啟用環境：${OFF}
-
-    ${DIM}cd $(pwd)${OFF}
-    source .venv/bin/activate
-
-  提示字元前面出現 ${BOLD}(.venv)${OFF} 就代表可以下 twflow 指令了。
+${BOLD}怎麼用：在這個資料夾裡下 ./twflow 指令即可${OFF}
+${DIM}（不需要啟用虛擬環境，./twflow 會自己找到對的 Python）${OFF}
 
 ${BOLD}第一件該做的事——確認連得上證交所：${OFF}
 
-    twflow --mode live doctor
+    ./twflow --mode live doctor
 
 ${BOLD}想先看畫面（用假資料，不連網）：${OFF}
 
-    twflow demo --days 5
-    twflow serve        ${DIM}# 然後瀏覽器開 127.0.0.1:8000${OFF}
+    ./twflow demo --days 5
+    ./twflow serve      ${DIM}# 然後瀏覽器開 127.0.0.1:8000${OFF}
+
+${DIM}下次開終端機記得先切回這個資料夾：
+    cd $(pwd)${OFF}
 
 DONE

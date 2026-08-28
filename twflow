@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# 免啟用環境的入口。在專案資料夾裡直接用：
+#
+#     ./twflow doctor
+#     ./twflow serve
+#
+# 效果等同於先 `source .venv/bin/activate` 再下 `twflow`，
+# 但少一個步驟——而「忘記啟用環境」是新手最常見的卡關原因。
+set -e
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+BIN="$HERE/.venv/bin/twflow"
+
+if [ ! -x "$BIN" ]; then
+  printf '\033[31m找不到已安裝的 twflow\033[0m\n\n'
+  printf '看起來還沒安裝，或安裝沒有完成。請先執行：\n\n'
+  printf '    bash install.sh\n\n'
+  exit 1
+fi
+
+exec "$BIN" "$@"

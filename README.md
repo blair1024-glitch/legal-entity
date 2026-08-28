@@ -40,11 +40,16 @@
 ```
 
 檢查 Python 版本、建立虛擬環境、安裝套件、跑測試、建立設定檔，一次做完，
-失敗時會直接說明怎麼修。之後每次使用先啟用環境：
+失敗時會直接說明怎麼修。
+
+之後直接用專案根目錄的 `./twflow`，**不需要啟用虛擬環境**：
 
 ```bash
-source .venv/bin/activate
+./twflow doctor
+./twflow serve
 ```
+
+（習慣 venv 的話，`source .venv/bin/activate` 之後直接下 `twflow` 也一樣。）
 
 <details>
 <summary>手動安裝（如果你想自己控制每一步）</summary>
