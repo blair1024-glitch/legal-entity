@@ -72,14 +72,40 @@ def _t86() -> str:
 
 
 def _qfiis() -> str:
-    fields = ["證券代號", "證券名稱", "發行股數", "全體外資及陸資持有股數",
-              "外資及陸資持股比率"]
-    data = [
-        [code, name, f"{25_000_000_000 - i * 1_000_000_000:,}",
-         f"{15_000_000_000 - i * 900_000_000:,}", f"{72.5 - i * 6.3:.2f}"]
-        for i, (code, name, _, _) in enumerate(SAMPLE)
-    ]
-    return json.dumps({"stat": "OK", "fields": fields, "data": data}, ensure_ascii=False)
+    """外資持股比率樣本.
+
+    這份要產生「全市場規模」的列數：正式的 fetch() 會拒收列數過少的回應
+    （見 twse_qfiis.MIN_MARKET_ROWS——不帶 selectType 時證交所只回 8 檔
+    水泥股，那種殘缺資料不能當成全市場）。樣本太小會連自己的守門機制
+    都過不了。
+    """
+    fields = ["證券代號", "證券名稱", "國際證券編碼", "發行股數",
+              "外資及陸資尚可投資股數", "全體外資及陸資持有股數",
+              "外資及陸資尚可投資比率", "全體外資及陸資持股比率"]
+
+    data = []
+    for i, (code, name, _, _) in enumerate(SAMPLE):
+        issued = 25_000_000_000 - i * 1_000_000_000
+        held = 15_000_000_000 - i * 900_000_000
+        data.append([
+            code, name, f"TW000{code}004", f"{issued:,}",
+            f"{issued - held:,}", f"{held:,}",
+            f"{100 - (72.5 - i * 6.3):.2f}", f"{72.5 - i * 6.3:.2f}",
+        ])
+
+    # 補到全市場的量級，代號從 1200 起跳避免和 SAMPLE 重複
+    for i in range(150):
+        code = str(1200 + i)
+        issued = 3_000_000_000 + i * 7_000_000
+        held = int(issued * (0.05 + (i % 60) / 100))
+        data.append([
+            code, f"示例{code}", f"TW000{code}004", f"{issued:,}",
+            f"{issued - held:,}", f"{held:,}",
+            f"{100 - held / issued * 100:.2f}", f"{held / issued * 100:.2f}",
+        ])
+
+    return json.dumps({"stat": "OK", "fields": fields, "data": data,
+                       "total": len(data)}, ensure_ascii=False)
 
 
 def _meta(market: str) -> str:
