@@ -36,9 +36,26 @@
 ## 快速開始
 
 ```bash
-pip install -e .
-cp config.example.yaml config.yaml     # 把 mode 改成 live
+./install.sh
 ```
+
+檢查 Python 版本、建立虛擬環境、安裝套件、跑測試、建立設定檔，一次做完，
+失敗時會直接說明怎麼修。之後每次使用先啟用環境：
+
+```bash
+source .venv/bin/activate
+```
+
+<details>
+<summary>手動安裝（如果你想自己控制每一步）</summary>
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.lock
+pip install -e . --no-deps
+cp config.example.yaml config.yaml     # 確認 mode 是 live
+```
+</details>
 
 ### 先看看長什麼樣子（不需外網）
 
