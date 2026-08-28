@@ -139,3 +139,42 @@ def run_eod(
 def _calibrate(store: Store, day: dt.date) -> int:
     acc = calibrate_day(store, day)
     return acc.n_stocks if acc else 0
+
+
+def run_eod_range(
+    store: Store,
+    fetcher: Fetcher,
+    start: dt.date,
+    end: dt.date,
+    *,
+    markets: list[str] | None = None,
+    on_day=None,
+) -> dict[str, RunReport]:
+    """回補一段日期區間的盤後資料.
+
+    校準係數需要每檔至少 5 個交易日的樣本才會生效（見
+    :func:`twflow.calibrate.update_coefficients`），一天一天跑太慢，
+    所以提供區間回補。
+
+    週末會自動跳過；某一天失敗（非交易日、來源改版）只記錄下來，
+    不中斷整個區間——回補二十天不該因為中間有個國定假日就停掉。
+
+    注意：**盤中推估資料無法回補**。證交所沒有提供歷史逐筆或分時報價，
+    推估值只能在當天盤中即時累積。所以回補出來的是官方三大法人數據，
+    校準要等你實際盤中跑過 ``twflow poll`` 才會有樣本可比。
+    """
+    markets = markets or ["TWSE"]
+    results: dict[str, RunReport] = {}
+
+    day = start
+    while day <= end:
+        if day.weekday() >= 5:
+            day += dt.timedelta(days=1)
+            continue
+        report = run_eod(store, fetcher, day, markets=markets, with_bsr=False)
+        results[day.isoformat()] = report
+        if on_day is not None:
+            on_day(day, report)
+        day += dt.timedelta(days=1)
+
+    return results

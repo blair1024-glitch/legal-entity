@@ -7,6 +7,7 @@
     twflow sync      匯入上市／上櫃證券清單與產業別
     twflow poll      盤中輪詢，把即時報價轉成資金流
     twflow eod       盤後：抓官方三大法人數據並校準推估值
+                     加 --since/--until 可回補一段日期區間
     twflow serve     啟動網頁儀表板
     twflow demo      產生合成資料，讓儀表板在沒有外網時也能完整展示
     twflow fixtures  產生合成 fixture 樣本，讓離線也能跑完整的 doctor
@@ -150,7 +151,10 @@ def cmd_poll(args, config: Config) -> int:
 # ---------- eod ----------
 
 def cmd_eod(args, config: Config) -> int:
-    from .pipeline import run_eod
+    from .pipeline import run_eod, run_eod_range
+
+    if args.since:
+        return _eod_range(args, config)
 
     day = _parse_date(args.date)
     with Store(config.get("db_path")) as store:
@@ -181,6 +185,57 @@ def cmd_eod(args, config: Config) -> int:
         else:
             print("\n（尚無盤中推估資料可供校準——盤中先跑過 `twflow poll` 才會有。）")
         return 0 if report.ok else 1
+
+
+def _eod_range(args, config: Config) -> int:
+    """回補一段日期區間."""
+    from .pipeline import run_eod_range
+
+    start = dt.date.fromisoformat(args.since)
+    end = dt.date.fromisoformat(args.until) if args.until else today_taipei()
+    if start > end:
+        print(f"起始日 {start} 晚於結束日 {end}", file=sys.stderr)
+        return 1
+
+    fetcher = _fetcher(config, args.mode)
+    markets = [str(m) for m in config.get("markets", ["TWSE"])]
+
+    print(f"回補 {start} → {end}\n")
+    failed: list[str] = []
+
+    def on_day(day, report):
+        ok = sum(1 for s in report.steps if s.ok)
+        mark = "✓" if report.ok else "✗"
+        print(f"  {mark} {day}  {ok}/{len(report.steps)} 個步驟成功")
+        if not report.ok:
+            failed.append(day.isoformat())
+            for step in report.steps:
+                if not step.ok:
+                    print(f"        {step.name}: {step.detail[:110]}")
+
+    with Store(config.get("db_path")) as store:
+        results = run_eod_range(
+            store, fetcher, start, end, markets=markets, on_day=on_day
+        )
+        n = update_coefficients_after_backfill(store)
+
+    print(f"\n完成 {len(results)} 個交易日，{len(failed)} 天有問題。")
+    if failed:
+        print(f"  有問題的日期: {', '.join(failed[:10])}"
+              + (" …" if len(failed) > 10 else ""))
+        print("  非交易日失敗是正常的；若是欄位結構問題，請跑 `twflow doctor`。")
+    print(f"更新 {n} 檔的校準係數。")
+    print(
+        "\n提醒：盤中推估資料**無法回補**（證交所沒有歷史分時報價），"
+        "\n所以校準要等你實際盤中跑過 `twflow poll` 之後才會有樣本可比。"
+    )
+    return 0
+
+
+def update_coefficients_after_backfill(store) -> int:
+    from .calibrate import update_coefficients
+
+    return update_coefficients(store)
 
 
 # ---------- serve ----------
@@ -255,6 +310,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     e = sub.add_parser("eod", help="盤後抓官方數據並校準")
     e.add_argument("--date", help="交易日 YYYY-MM-DD，預設為上一個交易日")
+    e.add_argument("--since", help="回補起始日 YYYY-MM-DD（改為區間模式）")
+    e.add_argument("--until", help="回補結束日 YYYY-MM-DD，預設今天")
     e.set_defaults(func=cmd_eod)
 
     sv = sub.add_parser("serve", help="啟動網頁儀表板")

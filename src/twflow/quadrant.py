@@ -31,24 +31,66 @@ QUADRANT_ACCEL_IN = "加速流入"
 QUADRANT_SLOWING_IN = "流入但放緩"
 QUADRANT_ACCEL_OUT = "加速流出"
 QUADRANT_SLOWING_OUT = "流出但放緩"
+# 開盤最初幾分鐘資料太少，算不出有意義的加速度。與其硬塞一個象限，
+# 不如誠實說「還不知道」。
+QUADRANT_UNKNOWN = "動能待觀察"
 
 QUADRANT_ORDER = [
     QUADRANT_ACCEL_IN,
     QUADRANT_SLOWING_IN,
     QUADRANT_ACCEL_OUT,
     QUADRANT_SLOWING_OUT,
+    QUADRANT_UNKNOWN,
 ]
 
+# 動能至少需要前後各這麼多分鐘的資料才算得出來
+MIN_MOMENTUM_HALF_WINDOW = 2.0
 
-def classify_quadrant(strength: float, momentum: float) -> str:
+
+def classify_quadrant(strength: float, momentum: float, momentum_known: bool = True) -> str:
     """依強度與動能的正負決定象限.
 
     邊界（強度或動能剛好為 0）歸類到「放緩」側：資金流剛好打平時，
     說它「在加速」比說它「在放緩」更容易誤導。
+
+    ``momentum_known=False`` 時回傳 :data:`QUADRANT_UNKNOWN`——開盤最初幾分鐘
+    還沒有足夠的歷史可以比較，這時把板塊塞進「加速流入」是在編造資訊。
     """
+    if not momentum_known:
+        return QUADRANT_UNKNOWN
     if strength > 0:
         return QUADRANT_ACCEL_IN if momentum > 0 else QUADRANT_SLOWING_IN
     return QUADRANT_SLOWING_OUT if momentum > 0 else QUADRANT_ACCEL_OUT
+
+
+def resolve_momentum_window(
+    earliest: dt.datetime,
+    now: dt.datetime,
+    window_minutes: float,
+) -> tuple[float, bool]:
+    """決定實際可用的動能視窗長度.
+
+    動能是「近 W 分鐘的強度」減「前 W 分鐘的強度」，需要 2W 分鐘的歷史。
+    開盤後還不到 2W 分鐘時有三種選擇，這裡採第三種：
+
+    1. 照樣用 W —— 前段視窗是空的，動能會退化成強度本身，於是所有淨流入的
+       板塊都被標成「加速流入」。這是**錯的**，而且錯得很有說服力。
+    2. 直接不顯示 —— 開盤第一個小時整張圖空白，實用性太差。
+    3. **把已經過去的時間對半切** —— 例如開盤 10 分鐘就比較「近 5 分鐘」與
+       「前 5 分鐘」。這仍然是誠實的加速度，只是時間尺度較短，
+       所以要把實際使用的視窗長度回報給呼叫端顯示出來。
+
+    Returns
+    -------
+    ``(有效視窗分鐘數, 動能是否可信)``
+    """
+    elapsed = (now - earliest).total_seconds() / 60.0
+    if elapsed >= 2 * window_minutes:
+        return float(window_minutes), True
+    half = elapsed / 2.0
+    if half < MIN_MOMENTUM_HALF_WINDOW:
+        return half, False
+    return half, True
 
 
 @dataclass
@@ -66,6 +108,8 @@ class SectorPoint:
     custom: bool = False
     recent_strength: float = 0.0
     prior_strength: float = 0.0
+    momentum_known: bool = True
+    momentum_window_minutes: float = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -80,6 +124,8 @@ class SectorPoint:
             "custom": self.custom,
             "recent_strength": round(self.recent_strength, 6),
             "prior_strength": round(self.prior_strength, 6),
+            "momentum_known": self.momentum_known,
+            "momentum_window_minutes": round(self.momentum_window_minutes, 1),
         }
 
 
@@ -150,8 +196,13 @@ def compute_quadrants(
 
     if now is None:
         now = max(ts for ts, _ in rows)
-    recent_start = now - dt.timedelta(minutes=window_minutes)
-    prior_start = recent_start - dt.timedelta(minutes=window_minutes)
+
+    # 開盤初期沒有足夠歷史可比，視窗要縮短（並回報縮短後的長度），
+    # 否則動能會退化成強度本身，把所有板塊都誤標成「加速」。
+    earliest = min(ts for ts, _ in rows)
+    effective_window, momentum_known = resolve_momentum_window(earliest, now, window_minutes)
+    recent_start = now - dt.timedelta(minutes=effective_window)
+    prior_start = recent_start - dt.timedelta(minutes=effective_window)
 
     acc: dict[str, _Acc] = {}
     for ts, row in rows:
@@ -175,7 +226,9 @@ def compute_quadrants(
         if ts > recent_start:
             rec.recent.net += net
             rec.recent.turnover += turnover
-        elif ts > prior_start:
+        elif ts >= prior_start:
+            # 下界要含等號：視窗縮短時 prior_start 會剛好落在最早一筆資料上，
+            # 用嚴格大於會把它整個丟掉，前段視窗就空了。
             rec.prior.net += net
             rec.prior.turnover += turnover
 
@@ -186,13 +239,18 @@ def compute_quadrants(
         strength = rec.total.strength
         recent_s = rec.recent.strength
         prior_s = rec.prior.strength
-        momentum = recent_s - prior_s
+        # 前段視窗完全沒有成交時，兩者相減得到的不是加速度而是強度本身，
+        # 所以這種板塊也要標為動能不可信（即使整體時間已經夠長）。
+        known = momentum_known and rec.prior.turnover > 0
+        momentum = recent_s - prior_s if known else 0.0
         points.append(
             SectorPoint(
                 sector=sector,
                 strength=strength,
                 momentum=momentum,
-                quadrant=classify_quadrant(strength, momentum),
+                quadrant=classify_quadrant(strength, momentum, known),
+                momentum_known=known,
+                momentum_window_minutes=effective_window,
                 net_value=rec.total.net,
                 burst_net_value=rec.burst_net,
                 turnover_value=rec.total.turnover,

@@ -217,3 +217,11 @@ footer b { color: var(--fg-dim); }
   main { padding: 0.85rem; }
   .topbar { padding: 0.75rem 1rem; }
 }
+
+/* 動能不足以判定時的中性色 */
+.q-unknown { color: var(--fg-faint); }
+.window-note {
+  font-size: 0.75rem; color: var(--warn);
+  background: var(--warn-bg); border: 1px solid rgba(210,153,34,0.3);
+  padding: 0.1rem 0.45rem; border-radius: 4px; white-space: nowrap;
+}

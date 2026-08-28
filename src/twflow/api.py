@@ -68,11 +68,20 @@ def create_app(store: Store, config: Config) -> FastAPI:
             min_turnover=float(config.get("quadrant.min_turnover", 0)),
             calibration=calibration(),
         )
+        requested_window = int(window or config.get("quadrant.momentum_window_minutes", 30))
+        # 開盤初期歷史不足時實際用的視窗會被縮短，要如實回報而不是回傳使用者
+        # 選的那個數字——否則畫面說「30 分鐘」但其實是拿 5 分鐘算的。
+        effective = points[0].momentum_window_minutes if points else float(requested_window)
+        unknown = sum(1 for p in points if not p.momentum_known)
+
         return {
             "trade_date": trade_date,
             "as_of": rows[-1]["minute_ts"] if rows else None,
             "session_open": is_session_open(),
-            "window_minutes": int(window or config.get("quadrant.momentum_window_minutes", 30)),
+            "window_minutes": requested_window,
+            "effective_window_minutes": round(effective, 1),
+            "window_shortened": effective < requested_window - 0.05,
+            "momentum_unknown_sectors": unknown,
             "estimated": True,
             "disclaimer": INTRADAY_DISCLAIMER,
             "accuracy": accuracy_summary(store),

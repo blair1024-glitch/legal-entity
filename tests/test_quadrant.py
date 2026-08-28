@@ -13,9 +13,11 @@ from twflow.quadrant import (
     QUADRANT_ACCEL_OUT,
     QUADRANT_SLOWING_IN,
     QUADRANT_SLOWING_OUT,
+    QUADRANT_UNKNOWN,
     classify_quadrant,
     compute_quadrants,
     rank_stocks,
+    resolve_momentum_window,
 )
 from twflow.sectors import SectorMap, aggregate_by_sector
 
@@ -223,3 +225,105 @@ class TestRankStocks:
         assert out[0]["net_value"] == 150
         assert out[0]["turnover_value"] == 1500
         assert out[0]["last_price"] == 11.0
+
+
+class TestMomentumWindowResolution:
+    """開盤初期的動能視窗處理.
+
+    這裡防的是一個很有說服力的錯誤：開盤後不到 2W 分鐘時，「前一個視窗」
+    是空的，動能會退化成強度本身，於是**所有**淨流入的板塊都被標成
+    「加速流入」、所有淨流出的都是「加速流出」——四個象限只剩兩個到得了，
+    而畫面看起來完全正常。
+    """
+
+    def test_full_window_used_when_history_is_sufficient(self):
+        earliest = BASE
+        now = BASE + dt.timedelta(minutes=90)
+        window, known = resolve_momentum_window(earliest, now, 30)
+        assert window == 30.0
+        assert known is True
+
+    def test_window_halves_the_available_history_when_short(self):
+        # 開盤才 20 分鐘，就比較「近 10 分鐘」與「前 10 分鐘」
+        window, known = resolve_momentum_window(BASE, BASE + dt.timedelta(minutes=20), 30)
+        assert window == 10.0
+        assert known is True
+
+    def test_momentum_unavailable_in_the_first_couple_of_minutes(self):
+        window, known = resolve_momentum_window(BASE, BASE + dt.timedelta(minutes=1), 30)
+        assert known is False
+
+    def test_exactly_two_windows_of_history_uses_the_full_window(self):
+        window, known = resolve_momentum_window(BASE, BASE + dt.timedelta(minutes=60), 30)
+        assert window == 30.0
+
+    def test_opening_minutes_are_not_labelled_accelerating(self):
+        """回歸測試：開盤 1 分鐘不該把所有板塊標成「加速」."""
+        m = smap({"A1": "板塊", "A2": "板塊"})
+        rows = [row(c, t, net=100, turnover=1000)
+                for t in range(2) for c in ("A1", "A2")]
+        pts = compute_quadrants(rows, m, window_minutes=30, min_constituents=2)
+        assert pts[0].quadrant == QUADRANT_UNKNOWN
+        assert pts[0].momentum_known is False
+        assert pts[0].momentum == 0.0
+        # 強度仍然是可信的——不知道的只有加速度
+        assert pts[0].strength > 0
+
+    def test_short_history_still_detects_a_genuine_slowdown(self):
+        """開盤 10 分鐘、買盤明顯轉弱 → 應正確判為「流入但放緩」."""
+        m = smap({"A1": "板塊", "A2": "板塊"})
+        rows = []
+        for t in range(11):
+            net = 300 if t < 5 else 30
+            rows += [row("A1", t, net=net, turnover=1000),
+                     row("A2", t, net=net, turnover=1000)]
+        pts = compute_quadrants(rows, m, window_minutes=30, min_constituents=2)
+        assert pts[0].quadrant == QUADRANT_SLOWING_IN
+        assert pts[0].momentum_known is True
+        # 有效視窗縮短成 5 分鐘，且要回報出來讓 UI 顯示
+        assert pts[0].momentum_window_minutes == pytest.approx(5.0)
+
+    def test_sector_with_no_prior_turnover_is_flagged_individually(self):
+        """整體時間夠長，但某板塊前段完全沒成交 → 該板塊動能仍不可信."""
+        m = smap({"A1": "活躍", "A2": "活躍", "B1": "冷門", "B2": "冷門"})
+        rows = []
+        for t in range(0, 120):
+            rows += [row("A1", t, net=100, turnover=1000),
+                     row("A2", t, net=100, turnover=1000)]
+        # 冷門板塊只在最後 10 分鐘有成交
+        for t in range(110, 120):
+            rows += [row("B1", t, net=100, turnover=1000),
+                     row("B2", t, net=100, turnover=1000)]
+        pts = {p.sector: p for p in compute_quadrants(rows, m, window_minutes=30,
+                                                      min_constituents=2)}
+        assert pts["活躍"].momentum_known is True
+        assert pts["冷門"].momentum_known is False
+        assert pts["冷門"].quadrant == QUADRANT_UNKNOWN
+
+    @pytest.mark.parametrize("switch_at,before,after,expected", [
+        (90, 50, 400, QUADRANT_ACCEL_IN),        # 買盤轉強
+        (90, 400, 50, QUADRANT_SLOWING_IN),      # 買盤轉弱
+        (90, -400, -50, QUADRANT_SLOWING_OUT),   # 賣壓收斂
+        (90, -50, -400, QUADRANT_ACCEL_OUT),     # 賣壓加重
+    ])
+    def test_all_four_quadrants_are_reachable(self, switch_at, before, after, expected):
+        m = smap({"A1": "板塊", "A2": "板塊"})
+        rows = [row(c, t, net=(before if t < switch_at else after), turnover=1000)
+                for t in range(120) for c in ("A1", "A2")]
+        pts = compute_quadrants(rows, m, window_minutes=30, min_constituents=2)
+        assert pts[0].quadrant == expected
+
+    def test_steady_flow_reports_zero_momentum(self):
+        m = smap({"A1": "板塊", "A2": "板塊"})
+        rows = [row(c, t, net=200, turnover=1000) for t in range(120) for c in ("A1", "A2")]
+        pts = compute_quadrants(rows, m, window_minutes=30, min_constituents=2)
+        assert pts[0].momentum == pytest.approx(0.0)
+
+
+class TestClassifyQuadrantUnknown:
+    def test_unknown_overrides_strength_and_momentum(self):
+        assert classify_quadrant(0.5, 0.5, momentum_known=False) == QUADRANT_UNKNOWN
+        assert classify_quadrant(-0.5, -0.5, momentum_known=False) == QUADRANT_UNKNOWN
+
+    def test_known_defaults_to_true_for_backwards_compatibility(self):
+        assert classify_quadrant(0.2, 0.1) == QUADRANT_ACCEL_IN

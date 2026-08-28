@@ -247,3 +247,55 @@ class TestApi:
         res = client.get("/")
         assert res.status_code == 200
         assert "板塊輪動" in res.text
+
+
+class TestBackfill:
+    """盤後資料的區間回補.
+
+    校準係數需要每檔至少 5 個交易日的樣本，一天一天跑太慢，所以要能回補。
+    """
+
+    def test_skips_weekends(self, store, fetcher):
+        from twflow.pipeline import run_eod_range
+
+        # 2026-08-14(五) → 2026-08-18(二)，中間的 15、16 是週末
+        results = run_eod_range(
+            store, fetcher, dt.date(2026, 8, 14), dt.date(2026, 8, 18), markets=["TWSE"]
+        )
+        assert sorted(results) == ["2026-08-14", "2026-08-17", "2026-08-18"]
+
+    def test_one_bad_day_does_not_stop_the_range(self, store, fetcher):
+        from twflow.pipeline import run_eod_range
+
+        broken = Fetcher(mode="fixture", fixture_dir="nope")
+        results = run_eod_range(
+            store, broken, dt.date(2026, 8, 17), dt.date(2026, 8, 19), markets=["TWSE"]
+        )
+        # 每一天都跑到了，只是全部失敗——不該在第一天就中斷
+        assert len(results) == 3
+        assert all(not r.ok for r in results.values())
+
+    def test_calls_the_progress_callback_per_day(self, store, fetcher):
+        from twflow.pipeline import run_eod_range
+
+        seen = []
+        run_eod_range(
+            store, fetcher, dt.date(2026, 8, 17), dt.date(2026, 8, 18),
+            markets=["TWSE"], on_day=lambda d, r: seen.append(d),
+        )
+        assert seen == [dt.date(2026, 8, 17), dt.date(2026, 8, 18)]
+
+    def test_single_day_range_works(self, store, fetcher):
+        from twflow.pipeline import run_eod_range
+
+        results = run_eod_range(
+            store, fetcher, dt.date(2026, 8, 17), dt.date(2026, 8, 17), markets=["TWSE"]
+        )
+        assert list(results) == ["2026-08-17"]
+
+    def test_range_ending_before_start_yields_nothing(self, store, fetcher):
+        from twflow.pipeline import run_eod_range
+
+        assert run_eod_range(
+            store, fetcher, dt.date(2026, 8, 20), dt.date(2026, 8, 17), markets=["TWSE"]
+        ) == {}

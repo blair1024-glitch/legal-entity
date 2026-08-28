@@ -10,6 +10,8 @@ const QUADRANT_COLORS = {
   '流入但放緩': '#d29922',
   '加速流出': '#3fb950',
   '流出但放緩': '#58a6ff',
+  // 開盤初期歷史不足，算不出加速度。灰色代表「還不知道」，不是第五種狀態。
+  '動能待觀察': '#6e7b8a',
 };
 
 const REFRESH_MS = 30000;
@@ -124,10 +126,16 @@ function renderQuadrant(data) {
       formatter: p => {
         const d = p.data.raw;
         const src = d.custom ? '自訂細分板塊' : '官方產業別';
+        // 動能不可信時顯示 +0.00% 會讓人以為「力道剛好持平」，
+        // 但實情是「還算不出來」——兩者意思差很多。
+        const momentum = d.momentum_known
+          ? `${d.momentum >= 0 ? '+' : ''}${(d.momentum * 100).toFixed(2)}%`
+          + ` <span style="color:#6e7b8a">(${d.momentum_window_minutes}分)</span>`
+          : '<span style="color:#6e7b8a">歷史不足，尚無法判定</span>';
         return `<b>${d.sector}</b> <span style="color:#6e7b8a">(${src})</span><br>
           <span style="color:${QUADRANT_COLORS[d.quadrant]}">${d.quadrant}</span><br>
           強度　${d.strength >= 0 ? '+' : ''}${(d.strength * 100).toFixed(2)}%<br>
-          動能　${d.momentum >= 0 ? '+' : ''}${(d.momentum * 100).toFixed(2)}%<br>
+          動能　${momentum}<br>
           淨流　${money(d.net_value)}<br>
           成交值 ${money(d.turnover_value)}<br>
           成分股 ${d.constituents} 檔
@@ -202,6 +210,19 @@ async function loadQuadrant() {
 
   renderQuadrant(data);
   document.getElementById('disclaimer-text').textContent = data.disclaimer || '';
+
+  // 開盤初期視窗會自動縮短，要讓使用者知道現在看的是幾分鐘的動能
+  const noteEl = document.getElementById('window-note');
+  if (data.window_shortened) {
+    noteEl.textContent = `開盤未滿 ${data.window_minutes * 2} 分鐘，`
+      + `動能改以 ${data.effective_window_minutes} 分鐘計算`;
+    noteEl.hidden = false;
+  } else if (data.momentum_unknown_sectors > 0) {
+    noteEl.textContent = `${data.momentum_unknown_sectors} 個板塊歷史不足，動能待觀察`;
+    noteEl.hidden = false;
+  } else {
+    noteEl.hidden = true;
+  }
 
   // 板塊排行沿用同一份資料，不必再打一次 API
   renderRankList(document.getElementById('sector-rank'), data.points, {
