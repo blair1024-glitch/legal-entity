@@ -86,6 +86,11 @@ twse／tpex／taifex）。所有端點網址與欄位結構都是依公開文件
 
 - `twflow doctor` 會逐一打每個端點，印出實際拿到的欄位結構。欄位對不上時，
   錯誤訊息會直接列出**實際觀察到的欄位名稱**，照著改對應的 parser 即可。
+
+  > **注意抓取模式。** 沒有 `config.yaml`（或沒把 `mode` 設成 `live`）時，
+  > doctor 會以 `fixture` 模式跑，讀的是本機樣本、**根本沒連網**，卻會印出
+  > 全綠——那是假的安心感。doctor 開頭會標明模式，fixture 模式還會額外警告。
+  > 要驗證真實連線請確定跑的是 `twflow --mode live doctor`。
 - `twflow record` 把真實回應存進 `fixtures/`，之後 `pytest` 就是在真實結構上跑。
 
 parser 都寫成**依欄位標題比對**而非欄位索引，所以證交所調整欄位順序不會讓它

@@ -76,7 +76,24 @@ def cmd_doctor(args, config: Config) -> int:
         ("券商分點（本機檔案）", lambda: bsr.load_directory()),
     ]
 
-    print(f"\n資料來源診斷  日期={day}  模式={fetcher.mode}\n" + "─" * 68)
+    banner = {
+        "live": "live —— 實際連線到證交所",
+        "fixture": "fixture —— 只讀本機樣本，不連網",
+        "record": "record —— 實際連線並錄製樣本",
+    }.get(fetcher.mode, fetcher.mode)
+
+    print(f"\n資料來源診斷  日期={day}")
+    print(f"模式：{banner}")
+    if fetcher.mode == "fixture":
+        # 這一段很重要：fixture 模式下全綠代表「樣本解析得動」，
+        # 完全沒有驗證到「連得上證交所」。不講清楚會給出假的安心感。
+        print(
+            "\n  ⚠  這不是連線測試。以下結果只證明 parser 讀得懂本機樣本，\n"
+            "     沒有碰到證交所。要驗證真實連線請改用：\n"
+            "         twflow --mode live doctor\n"
+            "     （或在 config.yaml 設 mode: live）"
+        )
+    print("─" * 68)
     failures = 0
     for name, fn in checks:
         try:
@@ -103,10 +120,18 @@ def cmd_doctor(args, config: Config) -> int:
                 print(f"    範例: {sample}")
     print("─" * 68)
     if failures:
-        print(f"{failures} 個來源有問題。若欄位結構與預期不符，請對照上面的"
-              f"「實際觀察到」修正 src/twflow/sources/ 底下對應的 parser。\n")
+        print(
+            f"{failures} 個來源有問題。若欄位結構與預期不符，請對照上面的"
+            f"「實際觀察到」修正 src/twflow/sources/ 底下對應的 parser。"
+        )
+    elif fetcher.mode == "fixture":
+        print(
+            "樣本全部解析成功——但**這不代表連得上證交所**。\n"
+            "請改跑 `twflow --mode live doctor` 才算真正驗證過。"
+        )
     else:
-        print("全部通過。建議接著執行 `twflow record` 錄下真實樣本，再跑 pytest。\n")
+        print("全部通過。建議接著執行 `twflow record` 錄下真實樣本，再跑 pytest。")
+    print()
     return 1 if failures else 0
 
 
