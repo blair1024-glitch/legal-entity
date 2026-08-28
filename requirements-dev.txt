@@ -1,3 +1,4 @@
+# 開發用相依的下限宣告。重現環境請用 requirements-dev.lock。
 -r requirements.txt
 pytest>=8.0
 httpx>=0.27

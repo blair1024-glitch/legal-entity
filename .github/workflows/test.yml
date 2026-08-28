@@ -20,8 +20,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: 安裝相依套件
-        run: pip install -r requirements-dev.txt
+      # 用鎖定版本安裝，確保 CI 抓到的和開發時完全一致；
+      # 版本漂移造成的失敗應該在更新 lock 時才發生，而不是隨機出現。
+      - name: 安裝相依套件（鎖定版本）
+        run: |
+          pip install -r requirements-dev.lock
+          pip install -e . --no-deps
 
       # 測試全程離線，用 fixtures/ 的合成樣本，不會打到證交所
       - name: 執行測試
@@ -30,9 +34,7 @@ jobs:
       # doctor 在 fixture 模式下應該每個來源都通過——這同時驗證了
       # 合成樣本與 parser 沒有脫節
       - name: 離線診斷
-        run: |
-          pip install -e .
-          twflow --mode fixture doctor --date 2026-08-27
+        run: twflow --mode fixture doctor --date 2026-08-27
 
       # 端到端：產生示範資料 → 起伺服器 → 打每個 API
       - name: 煙霧測試

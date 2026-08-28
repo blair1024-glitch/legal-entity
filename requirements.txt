@@ -1,3 +1,5 @@
+# 這裡是「這個專案需要什麼」的下限宣告，不是鎖定版本。
+# 要重現一模一樣的環境請用 requirements.lock（見 README「鎖定套件版本」）。
 fastapi>=0.115
 uvicorn[standard]>=0.30
 requests>=2.31

@@ -262,10 +262,42 @@ web/                儀表板前端（ECharts 已 vendor，離線可用）
 
 ---
 
+## 鎖定套件版本
+
+專案分兩層宣告相依，兩者用途不同，別搞混：
+
+| 檔案 | 內容 | 用途 |
+|---|---|---|
+| `pyproject.toml` / `requirements*.txt` | 下限（`>=`） | 宣告「這個專案需要什麼」 |
+| `requirements.lock` / `requirements-dev.lock` | 完全鎖死（`==`，含間接相依） | 重現一模一樣的環境 |
+
+日常安裝用鎖定版本，確保你的環境和 CI 一致：
+
+```bash
+pip install -r requirements-dev.lock
+pip install -e . --no-deps      # --no-deps：相依已由 lock 裝好，別讓 pip 再解一次
+```
+
+要更新套件時重新產生 lock（用 [uv](https://github.com/astral-sh/uv)，也可用 pip-tools）：
+
+```bash
+uv pip compile pyproject.toml -o requirements.lock
+uv pip compile pyproject.toml requirements-dev.txt -o requirements-dev.lock
+pytest                          # 更新後一定要重跑，確認新版本沒有破壞什麼
+```
+
+lock 檔要進版控。這樣版本漂移造成的失敗只會在你主動更新 lock 時發生，
+而不是某天 CI 突然變紅、卻找不到自己改了什麼。
+
+> 只鎖直接相依（`fastapi==…`）是不夠的——實際弄壞環境的往往是間接相依
+> （例如 starlette、pydantic）。lock 檔連間接相依一起鎖，才真的能重現。
+
+---
+
 ## 開發
 
 ```bash
-pip install -r requirements-dev.txt
+pip install -r requirements-dev.lock
 pytest                      # 217 個測試，全程離線
 twflow fixtures             # 重新產生合成 fixture 樣本
 twflow --mode fixture doctor   # 離線跑診斷
