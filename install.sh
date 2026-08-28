@@ -42,8 +42,25 @@ ok "Python $PY_VER"
 
 # --- 2. 虛擬環境 ---
 say "建立獨立環境"
-if [ -d .venv ]; then
-  warn "已存在 .venv，沿用它（想重來就先 rm -rf .venv）"
+if [ -d .venv ] && [ -x .venv/bin/python ]; then
+  # 沿用舊環境前要確認它自己的 Python 版本也夠新。系統的 python3 升級了，
+  # 但既有的 .venv 仍然綁在舊直譯器上——這種不一致會在安裝時噴出
+  # 看不懂的錯誤，不如在這裡先講清楚。
+  VENV_OK=$(.venv/bin/python -c 'import sys; print(1 if sys.version_info[:2] >= (3,10) else 0)' 2>/dev/null || echo 0)
+  VENV_VER=$(.venv/bin/python -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo "?")
+  if [ "$VENV_OK" = "1" ]; then
+    warn "已存在 .venv（Python $VENV_VER），沿用它"
+  else
+    warn "既有的 .venv 是 Python $VENV_VER，太舊了——重建一個"
+    rm -rf .venv
+    python3 -m venv .venv
+    ok "已重建（Python $PY_VER）"
+  fi
+elif [ -d .venv ]; then
+  warn "既有的 .venv 不完整，重建一個"
+  rm -rf .venv
+  python3 -m venv .venv
+  ok "已重建"
 else
   python3 -m venv .venv
   ok "建立完成"
