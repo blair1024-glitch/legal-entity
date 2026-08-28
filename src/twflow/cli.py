@@ -8,6 +8,7 @@
     twflow poll      盤中輪詢，把即時報價轉成資金流
     twflow eod       盤後：抓官方三大法人數據並校準推估值
                      加 --since/--until 可回補一段日期區間
+    twflow auto      一個指令跑完整天：盤中輪詢、收盤後自動跑盤後流程
     twflow serve     啟動網頁儀表板
     twflow demo      產生合成資料，讓儀表板在沒有外網時也能完整展示
     twflow fixtures  產生合成 fixture 樣本，讓離線也能跑完整的 doctor
@@ -238,6 +239,20 @@ def update_coefficients_after_backfill(store) -> int:
     return update_coefficients(store)
 
 
+# ---------- auto ----------
+
+def cmd_auto(args, config: Config) -> int:
+    from .scheduler import Scheduler
+
+    with Store(config.get("db_path")) as store:
+        poller_universe = Scheduler(store, _fetcher(config, args.mode), config)
+        if not store.securities():
+            print("證券清單是空的。請先執行 `twflow sync`。", file=sys.stderr)
+            return 1
+        poller_universe.run()
+    return 0
+
+
 # ---------- serve ----------
 
 def cmd_serve(args, config: Config) -> int:
@@ -313,6 +328,9 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--since", help="回補起始日 YYYY-MM-DD（改為區間模式）")
     e.add_argument("--until", help="回補結束日 YYYY-MM-DD，預設今天")
     e.set_defaults(func=cmd_eod)
+
+    au = sub.add_parser("auto", help="盤中輪詢 + 收盤後自動跑盤後流程")
+    au.set_defaults(func=cmd_auto)
 
     sv = sub.add_parser("serve", help="啟動網頁儀表板")
     sv.add_argument("--host")

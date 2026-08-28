@@ -57,9 +57,24 @@ twflow record             # ② 把真實回應錄進 fixtures/
 pytest                    # ③ 用真實樣本重跑 parser 測試  ← 關鍵驗收點
 twflow sync               # ④ 匯入證券清單與官方產業別
 twflow eod --date 2026-08-27   # ⑤ 抓一天盤後數據，人工比對證交所網頁
-twflow poll               # ⑥ 盤中輪詢（09:00–13:30 自動停止）
-twflow serve              # ⑦ 開啟儀表板
+twflow auto               # ⑥ 盤中輪詢 + 收盤後自動跑盤後流程
+twflow serve              # ⑦ 開啟儀表板（另開一個終端機）
 ```
+
+### 日常使用：`twflow auto`
+
+`twflow auto` 是實際每天在跑的指令。它依時鐘決定該做什麼：
+
+| 時間 | 動作 |
+|---|---|
+| 09:00–13:30 | 輪詢即時報價，累積盤中資金流 |
+| 16:00 之後 | 跑當日盤後流程（官方三大法人數據 + 校準） |
+| 其餘時間 | 等待 |
+
+跨日、假日、程式中途重啟都會正確接續——「今天盤後跑過了沒」是查資料庫，
+不是記在記憶體裡，所以重開機也不會重複或漏跑。
+
+想手動控制的話，`twflow poll` 與 `twflow eod` 仍然可以個別使用。
 
 ### 為什麼 ①②③ 是必要的
 
@@ -240,6 +255,35 @@ twflow --mode fixture doctor   # 離線跑診斷
 
 測試分兩類：**演算法測試**用構造好的、已知答案的輸入驗證分類邏輯與統計量；
 **parser 測試**驗證欄位改名、順序調換、民國／西元年混用時不會靜默算錯。
+
+---
+
+## 讓它每天自己跑
+
+`twflow auto` 需要長時間執行。以 systemd 為例（Linux）：
+
+```ini
+# ~/.config/systemd/user/twflow.service
+[Unit]
+Description=twflow 台股資金流向
+
+[Service]
+WorkingDirectory=%h/legal-entity
+ExecStart=%h/legal-entity/.venv/bin/twflow auto
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target
+```
+
+```bash
+systemctl --user enable --now twflow.service
+journalctl --user -u twflow -f
+```
+
+macOS 用 launchd、或直接 `tmux new -s twflow 'twflow auto'` 也可以——
+重點是讓它在盤中持續跑，因為**盤中推估資料無法事後回補**。
 
 ---
 
