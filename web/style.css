@@ -231,3 +231,7 @@ footer b { color: var(--fg-dim); }
   user-select: none;
 }
 .controls label.check input { accent-color: var(--slowing-out); cursor: pointer; }
+
+.clear-filter { margin-left: auto; font-size: 0.78rem; }
+.rank-row.clickable { cursor: pointer; }
+.rank-row.clickable:hover { background: rgba(255,255,255,0.06); }

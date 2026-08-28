@@ -16,6 +16,9 @@ const QUADRANT_COLORS = {
 
 const REFRESH_MS = 30000;
 
+// 目前鑽取的板塊（null = 看全市場個股）。點板塊泡泡或板塊排行列即可切換。
+let selectedSector = null;
+
 /* ---------- 格式化 ---------- */
 
 // 台股習慣用「億」和「萬」，不是 M/B
@@ -211,7 +214,7 @@ function renderQuadrant(data) {
 
 /* ---------- 排行清單 ---------- */
 
-function renderRankList(el, rows, { label, value, badge } = {}) {
+function renderRankList(el, rows, { label, value, badge, key } = {}) {
   if (!rows.length) {
     el.innerHTML = '<div class="empty">尚無資料</div>';
     return;
@@ -221,7 +224,8 @@ function renderRankList(el, rows, { label, value, badge } = {}) {
     const v = value(r);
     const width = (Math.abs(v) / max) * 100;
     const b = badge ? badge(r) : '';
-    return `<div class="rank-row ${signClass(v)}">
+    const k = key ? ` data-key="${key(r).replace(/"/g, '&quot;')}"` : '';
+    return `<div class="rank-row ${signClass(v)}"${k}>
       <span class="bar" style="width:${width}%"></span>
       <span class="idx">${i + 1}</span>
       <span class="label">${label(r)}${b}</span>
@@ -262,10 +266,16 @@ async function loadQuadrant() {
   }
 
   // 板塊排行沿用同一份資料，不必再打一次 API
-  renderRankList(document.getElementById('sector-rank'), data.points, {
+  const sectorEl = document.getElementById('sector-rank');
+  renderRankList(sectorEl, data.points, {
     label: p => `${p.sector} <small>${p.constituents}檔</small>`,
     value: p => p.net_value,
     badge: quadrantBadge,
+    key: p => p.sector,
+  });
+  sectorEl.querySelectorAll('[data-key]').forEach(el => {
+    el.classList.add('clickable');
+    el.addEventListener('click', () => selectSector(el.dataset.key));
   });
 
   const acc = data.accuracy || {};
@@ -285,11 +295,30 @@ async function loadQuadrant() {
 }
 
 async function loadStocks() {
-  const data = await getJSON('/api/stocks?limit=15');
-  renderRankList(document.getElementById('stock-rank'), data.stocks, {
+  const q = selectedSector
+    ? `?sector=${encodeURIComponent(selectedSector)}`
+    : '?limit=15';
+  const data = await getJSON(`/api/stocks${q}`);
+
+  document.getElementById('stock-rank-title').textContent =
+    selectedSector ? `${selectedSector} · 成分股` : '個股資金流排行';
+  document.getElementById('clear-sector').hidden = !selectedSector;
+
+  const el = document.getElementById('stock-rank');
+  if (selectedSector && !data.stocks.length) {
+    el.innerHTML = '<div class="empty">這個板塊今天還沒有成交資料。</div>';
+    return;
+  }
+  renderRankList(el, data.stocks, {
     label: s => `${s.code} ${s.name || ''} <small>${s.sector}</small>`,
     value: s => s.net_value,
   });
+}
+
+function selectSector(sector) {
+  // 再點一次同一個板塊就取消篩選
+  selectedSector = (selectedSector === sector) ? null : sector;
+  loadStocks().catch(err => console.warn('載入成分股失敗:', err));
 }
 
 async function loadWatchlist() {
@@ -403,6 +432,16 @@ document.getElementById('explain-toggle').addEventListener('click', e => {
 
 document.getElementById('window-select').addEventListener('change', loadQuadrant);
 document.getElementById('trail-toggle').addEventListener('change', loadQuadrant);
+chart.on('click', params => {
+  const sector = params?.data?.raw?.sector;
+  if (sector) selectSector(sector);
+});
+
+document.getElementById('clear-sector').addEventListener('click', () => {
+  selectedSector = null;
+  loadStocks().catch(err => console.warn('載入個股失敗:', err));
+});
+
 window.addEventListener('resize', () => chart.resize());
 
 refreshAll();

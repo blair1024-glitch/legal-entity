@@ -112,17 +112,31 @@ def create_app(store: Store, config: Config) -> FastAPI:
         }
 
     @app.get("/api/stocks")
-    def stocks(date: str | None = None, limit: int = Query(30, ge=1, le=200)):
-        """個股資金流排行（推估）."""
+    def stocks(
+        date: str | None = None,
+        limit: int = Query(30, ge=1, le=200),
+        sector: str | None = None,
+    ):
+        """個股資金流排行（推估）.
+
+        帶 ``sector`` 可只看某個板塊的成分股——從板塊圖點進來時用，
+        回答「這個板塊是被哪幾檔帶動的」。
+        """
         trade_date = resolve_date(date)
+        smap = sector_map()
         rows = store.flow_rows(trade_date)
+        if sector:
+            rows = [r for r in rows if smap.sector_of(r["code"]) == sector]
         ranked = rank_stocks(
-            rows, sector_map(), names=store.security_names(),
-            calibration=calibration(), limit=limit,
+            rows, smap, names=store.security_names(),
+            calibration=calibration(),
+            # 看單一板塊時不做頭尾裁切——成分股本來就不多，全部列出來
+            limit=0 if sector else limit,
         )
         return {
             "trade_date": trade_date,
             "estimated": True,
+            "sector": sector,
             "disclaimer": INTRADAY_DISCLAIMER,
             "stocks": ranked,
         }

@@ -133,7 +133,7 @@
     </div>
     <div id="quadrant-chart" class="chart"></div>
     <p class="chart-foot">
-      泡泡大小＝該板塊成交值　·　顏色＝所屬象限　·　滑鼠移上去看細節<br>
+      泡泡大小＝該板塊成交值　·　顏色＝所屬象限　·　點一下看成分股<br>
       <span id="trail-foot" hidden>軌跡顯示前 6 大板塊過去 100 分鐘走過的位置　·　點越大越接近現在</span>
     </p>
   </section>
@@ -149,8 +149,9 @@
 
     <section class="card">
       <div class="card-head">
-        <h2>個股資金流排行</h2>
+        <h2 id="stock-rank-title">個股資金流排行</h2>
         <span class="tag est">推估</span>
+        <button class="link clear-filter" id="clear-sector" hidden>← 看全部個股</button>
       </div>
       <div id="stock-rank" class="rank-list"></div>
     </section>

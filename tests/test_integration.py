@@ -243,6 +243,29 @@ class TestApi:
         body = client.get("/api/quadrant?window=15").json()
         assert body["window_minutes"] == 15
 
+    def test_stocks_can_be_filtered_to_one_sector(self, client):
+        """從板塊圖點進來時，要能回答「這個板塊是被哪幾檔帶動的」."""
+        all_stocks = client.get("/api/stocks").json()["stocks"]
+        sectors = {s["sector"] for s in all_stocks}
+        assert "晶圓代工" in sectors      # 2330 在 sectors.yaml 裡
+
+        filtered = client.get("/api/stocks?sector=晶圓代工").json()
+        assert filtered["sector"] == "晶圓代工"
+        assert filtered["stocks"]
+        assert {s["sector"] for s in filtered["stocks"]} == {"晶圓代工"}
+
+    def test_unfiltered_stocks_report_no_sector(self, client):
+        assert client.get("/api/stocks").json()["sector"] is None
+
+    def test_unknown_sector_yields_empty_list_not_error(self, client):
+        res = client.get("/api/stocks?sector=不存在的板塊")
+        assert res.status_code == 200
+        assert res.json()["stocks"] == []
+
+    def test_sector_filter_still_carries_the_disclaimer(self, client):
+        body = client.get("/api/stocks?sector=晶圓代工").json()
+        assert "推估值" in body["disclaimer"]
+
     def test_index_page_is_served(self, client):
         res = client.get("/")
         assert res.status_code == 200
