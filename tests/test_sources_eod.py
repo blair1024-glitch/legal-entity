@@ -5,6 +5,7 @@
 單位換算，全部都要有明確的斷言。
 """
 
+import datetime as dt
 import json
 
 import pytest
@@ -297,3 +298,58 @@ class TestRocDate:
     def test_rejects_malformed(self):
         with pytest.raises(ValueError):
             roc_to_date("八月二十七")
+
+
+class TestQfiisWholeMarketGuard:
+    """MI_QFIIS 必須確認拿到的是全市場，而不是某個產業的子集.
+
+    實測發現：這個端點不帶 selectType 時會回 8 檔水泥股而且 stat=OK。
+    若候選機制照單全收，資料庫裡就會存進一份「看起來正常」的殘缺資料，
+    自選股的外資持股比率會整片是空的，而且完全看不出哪裡錯了。
+    """
+
+    def _payload(self, n):
+        return json.dumps({
+            "stat": "OK",
+            "fields": ["證券代號", "證券名稱", "外資及陸資持股比率"],
+            "data": [[f"{1101 + i}", f"股票{i}", "12.34"] for i in range(n)],
+        })
+
+    def test_rejects_a_partial_dataset(self, monkeypatch):
+        from twflow.httpclient import Response
+        from twflow.sources import twse_qfiis
+
+        calls = []
+
+        class FakeFetcher:
+            def get(self, url, params=None, **kw):
+                calls.append(params.get("selectType"))
+                # 兩個候選都只回一小撮資料
+                return Response(url=url, status=200, text=self_outer._payload(8))
+
+        self_outer = self
+        with pytest.raises(ParseError, match="不像全市場|拿不到"):
+            twse_qfiis.fetch(FakeFetcher(), dt.date(2026, 8, 27))
+        # 第一個候選不夠格，應該有繼續試下一個
+        assert len(calls) == len(twse_qfiis.SELECT_TYPES)
+
+    def test_accepts_a_full_market_dataset(self):
+        from twflow.httpclient import Response
+        from twflow.sources import twse_qfiis
+
+        outer = self
+
+        class FakeFetcher:
+            def get(self, url, params=None, **kw):
+                return Response(url=url, status=200, text=outer._payload(1360))
+
+        rows = twse_qfiis.fetch(FakeFetcher(), dt.date(2026, 8, 27))
+        assert len(rows) == 1360
+        assert rows[0]["trade_date"] == "2026-08-27"
+
+    def test_no_selecttype_candidate_was_removed(self):
+        """不帶參數會回單一產業卻不報錯，不該留在候選清單裡."""
+        from twflow.sources import twse_qfiis
+
+        assert None not in twse_qfiis.SELECT_TYPES
+        assert twse_qfiis.SELECT_TYPES[0] == "ALLBUT0999"

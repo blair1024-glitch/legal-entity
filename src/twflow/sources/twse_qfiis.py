@@ -69,10 +69,19 @@ def parse(text: str) -> list[dict]:
     return out
 
 
-# 這個端點的 selectType 取值無從查證（證交所沒有公開 API 文件），實測
-# "ALL" 會回空表。與其押一個值，不如依序試候選值、用第一個真的有資料的。
-# 這不是亂試——每個候選都是證交所其他端點實際在用的取值。
-SELECT_TYPES = ("ALLBUT0999", "ALL", None)
+# 實測結果（2026-08-27）：
+#     ALLBUT0999 → 1360 列   ← 全市場，正確
+#     ALL        →    0 列   （這個端點不吃 ALL，和 T86 不一樣）
+#     不帶參數    →    8 列   ← 危險：預設只回單一產業
+#
+# 「不帶參數」曾經在候選清單裡，那是個會安靜出錯的設計——它不會失敗，
+# 只會回 8 檔水泥股，然後被當成全市場存進資料庫。寧可整個抓取失敗，
+# 也不要拿一份看起來正常的殘缺資料去算外資持股比率。
+SELECT_TYPES = ("ALLBUT0999", "ALL")
+
+# 全市場查詢的合理下限。單一產業最多不到 100 檔（半導體 96），
+# 低於這個數字就代表拿到的不是全市場，而是某個子集。
+MIN_MARKET_ROWS = 100
 
 
 def fetch(fetcher: Fetcher, day: dt.date) -> list[dict]:
@@ -86,8 +95,16 @@ def fetch(fetcher: Fetcher, day: dt.date) -> list[dict]:
         try:
             rows = parse(fetcher.get(URL, params=params, headers=headers).text)
         except TwflowError as exc:
-            errors.append(f"selectType={select or '（不帶）'}: {exc}")
+            errors.append(f"selectType={select}: {exc}")
             continue
+
+        # 拿到資料還不夠——要確認它真的是全市場，而不是某個產業的子集
+        if len(rows) < MIN_MARKET_ROWS:
+            errors.append(
+                f"selectType={select}: 只有 {len(rows)} 列，不像全市場（疑似單一產業）"
+            )
+            continue
+
         for r in rows:
             r["trade_date"] = day.isoformat()
         return rows
