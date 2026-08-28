@@ -278,13 +278,18 @@ pip install -r requirements-dev.lock
 pip install -e . --no-deps      # --no-deps：相依已由 lock 裝好，別讓 pip 再解一次
 ```
 
-要更新套件時重新產生 lock（用 [uv](https://github.com/astral-sh/uv)，也可用 pip-tools）：
+要更新套件時用這個腳本重新產生（需要 [uv](https://github.com/astral-sh/uv)）：
 
 ```bash
-uv pip compile pyproject.toml -o requirements.lock
-uv pip compile pyproject.toml requirements-dev.txt -o requirements-dev.lock
+./scripts/lock.sh
 pytest                          # 更新後一定要重跑，確認新版本沒有破壞什麼
 ```
+
+**不要直接跑 `uv pip compile` 而不帶 `--python-version`。** uv 預設對你手邊
+那個直譯器解析，在 3.12 上解出來的 lock 可能釘到只支援 3.11+ 的套件，
+於是宣稱支援的 3.10 環境根本裝不起來。`scripts/lock.sh` 把「對最低支援版本
+解析」這件事寫死在裡面，就是為了不要再踩一次
+（websockets 17.1 需要 >=3.11，CI 的 3.10 job 因此掛過）。
 
 lock 檔要進版控。這樣版本漂移造成的失敗只會在你主動更新 lock 時發生，
 而不是某天 CI 突然變紅、卻找不到自己改了什麼。
