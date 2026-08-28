@@ -65,15 +65,18 @@ def cmd_doctor(args, config: Config) -> int:
     day = _parse_date(args.date)
     fetcher = _fetcher(config, args.mode)
 
+    # required=True 的來源撐起四象限、板塊排行與校準；其餘只是額外面板，
+    # 壞掉不影響主流程。混在一起報會讓兩個選配來源看起來像整體故障。
     checks = [
-        ("MIS 盤中即時報價", lambda: mis.fetch_batch(fetcher, [("2330", "TWSE"), ("2317", "TWSE")])),
-        ("上市證券清單與產業別", lambda: twse_meta.fetch(fetcher, "TWSE")),
-        ("上櫃證券清單與產業別", lambda: twse_meta.fetch(fetcher, "TPEX")),
-        ("上市三大法人買賣超 (T86)", lambda: twse_t86.fetch(fetcher, day)),
-        ("上櫃三大法人買賣超", lambda: tpex_insti.fetch(fetcher, day)),
-        ("外資持股比率 (MI_QFIIS)", lambda: twse_qfiis.fetch(fetcher, day)),
-        ("期貨三大法人未平倉", lambda: taifex.fetch(fetcher, day)),
-        ("券商分點（本機檔案）", lambda: bsr.load_directory()),
+        ("MIS 盤中即時報價", True,
+         lambda: mis.fetch_batch(fetcher, [("2330", "TWSE"), ("2317", "TWSE")])),
+        ("上市證券清單與產業別", True, lambda: twse_meta.fetch(fetcher, "TWSE")),
+        ("上櫃證券清單與產業別", True, lambda: twse_meta.fetch(fetcher, "TPEX")),
+        ("上市三大法人買賣超 (T86)", True, lambda: twse_t86.fetch(fetcher, day)),
+        ("上櫃三大法人買賣超", True, lambda: tpex_insti.fetch(fetcher, day)),
+        ("外資持股比率 (MI_QFIIS)", False, lambda: twse_qfiis.fetch(fetcher, day)),
+        ("期貨三大法人未平倉", False, lambda: taifex.fetch(fetcher, day)),
+        ("券商分點（本機檔案）", False, lambda: bsr.load_directory()),
     ]
 
     banner = {
@@ -94,13 +97,18 @@ def cmd_doctor(args, config: Config) -> int:
             "     （或在 config.yaml 設 mode: live）"
         )
     print("─" * 68)
-    failures = 0
-    for name, fn in checks:
+    core_failures = 0
+    optional_failures = 0
+    for name, required, fn in checks:
+        tag = "" if required else "  （選配）"
         try:
             rows = fn()
         except TwflowError as exc:
-            failures += 1
-            print(f"✗ {name}")
+            if required:
+                core_failures += 1
+            else:
+                optional_failures += 1
+            print(f"✗ {name}{tag}")
             print(f"    {exc}")
             observed = getattr(exc, "observed", None)
             if observed:
@@ -112,8 +120,11 @@ def cmd_doctor(args, config: Config) -> int:
                     print(f"    │ {line[:150]}")
                 print(f"    └── 共 {len(body)} 字元")
         except Exception as exc:  # noqa: BLE001
-            failures += 1
-            print(f"✗ {name}\n    未預期的錯誤: {exc!r}")
+            if required:
+                core_failures += 1
+            else:
+                optional_failures += 1
+            print(f"✗ {name}{tag}\n    未預期的錯誤: {exc!r}")
         else:
             n = len(rows)
             sample = ""
@@ -121,14 +132,21 @@ def cmd_doctor(args, config: Config) -> int:
                 first = rows[0]
                 sample = str(first if isinstance(first, dict) else vars(first))[:220]
             status = "✓" if n else "△"
-            print(f"{status} {name}: {n} 筆")
+            print(f"{status} {name}{tag}: {n} 筆")
             if sample:
                 print(f"    範例: {sample}")
     print("─" * 68)
-    if failures:
+    if core_failures:
         print(
-            f"{failures} 個來源有問題。若欄位結構與預期不符，請對照上面的"
-            f"「實際觀察到」修正 src/twflow/sources/ 底下對應的 parser。"
+            f"核心來源有 {core_failures} 個失敗——四象限與校準需要它們，請先修好。\n"
+            f"對照上面的「實際觀察到」修正 src/twflow/sources/ 底下對應的 parser，"
+            f"或加 --dump 看伺服器原始回應。"
+        )
+    elif optional_failures:
+        print(
+            f"核心來源全部通過，可以開始使用。\n"
+            f"另有 {optional_failures} 個選配來源失敗——它們只影響自選股的外資持股欄位"
+            f"與期貨面板，不影響四象限、板塊排行與校準。"
         )
     elif fetcher.mode == "fixture":
         print(
@@ -138,7 +156,8 @@ def cmd_doctor(args, config: Config) -> int:
     else:
         print("全部通過。建議接著執行 `twflow record` 錄下真實樣本，再跑 pytest。")
     print()
-    return 1 if failures else 0
+    # 選配來源失敗不算整體失敗——否則排程或腳本會誤判成安裝有問題
+    return 1 if core_failures else 0
 
 
 # ---------- record ----------
