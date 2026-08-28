@@ -3,7 +3,7 @@
   "url": "https://www.twse.com.tw/rwd/zh/fund/MI_QFIIS",
   "params": {
     "date": "20260827",
-    "selectType": "ALL",
+    "selectType": "ALLBUT0999",
     "response": "json"
   },
   "body": {},

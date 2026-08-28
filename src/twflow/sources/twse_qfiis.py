@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from ..errors import ParseError
+from ..errors import ParseError, TwflowError
 from ..httpclient import Fetcher
 from .twse_common import (
     cell,
@@ -69,13 +69,31 @@ def parse(text: str) -> list[dict]:
     return out
 
 
+# 這個端點的 selectType 取值無從查證（證交所沒有公開 API 文件），實測
+# "ALL" 會回空表。與其押一個值，不如依序試候選值、用第一個真的有資料的。
+# 這不是亂試——每個候選都是證交所其他端點實際在用的取值。
+SELECT_TYPES = ("ALLBUT0999", "ALL", None)
+
+
 def fetch(fetcher: Fetcher, day: dt.date) -> list[dict]:
-    resp = fetcher.get(
-        URL,
-        params={"date": day.strftime("%Y%m%d"), "selectType": "ALL", "response": "json"},
-        headers={"Referer": "https://www.twse.com.tw/zh/trading/foreign/mi-qfiis.html"},
+    headers = {"Referer": "https://www.twse.com.tw/zh/trading/foreign/mi-qfiis.html"}
+    errors: list[str] = []
+
+    for select in SELECT_TYPES:
+        params = {"date": day.strftime("%Y%m%d"), "response": "json"}
+        if select is not None:
+            params["selectType"] = select
+        try:
+            rows = parse(fetcher.get(URL, params=params, headers=headers).text)
+        except TwflowError as exc:
+            errors.append(f"selectType={select or '（不帶）'}: {exc}")
+            continue
+        for r in rows:
+            r["trade_date"] = day.isoformat()
+        return rows
+
+    raise ParseError(
+        SOURCE,
+        "試過所有 selectType 取值都拿不到資料",
+        observed=" | ".join(errors)[:500],
     )
-    rows = parse(resp.text)
-    for r in rows:
-        r["trade_date"] = day.isoformat()
-    return rows

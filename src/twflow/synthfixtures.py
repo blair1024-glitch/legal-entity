@@ -151,8 +151,10 @@ def _taifex() -> str:
 SPECS = [
     ("上市三大法人買賣超 T86", twse_t86.URL,
      {"date": "20260827", "selectType": "ALL", "response": "json"}, None, _t86),
+    # 參數要跟 fetch() 的第一個候選值一致（見 twse_qfiis.SELECT_TYPES）
     ("外資持股比率 MI_QFIIS", twse_qfiis.URL,
-     {"date": "20260827", "selectType": "ALL", "response": "json"}, None, _qfiis),
+     {"date": "20260827", "selectType": twse_qfiis.SELECT_TYPES[0], "response": "json"},
+     None, _qfiis),
     ("上市公司基本資料", twse_meta.TWSE_URL, None, None, lambda: _meta("TWSE")),
     ("上櫃公司基本資料", twse_meta.TPEX_URL, None, None, lambda: _meta("TPEX")),
     ("上櫃三大法人買賣超", tpex_insti.URL, None, None, _tpex_insti),
@@ -175,11 +177,12 @@ def generate(fixture_dir: str | Path = "fixtures") -> list[str]:
 
     # 期交所是 POST，每個契約各一次
     stamp = "2026/08/27"
-    for contract in taifex.DEFAULT_CONTRACTS:
+    # 同樣對齊 taifex.CONTRACT_CANDIDATES 的第一個候選代號
+    for label, candidates in taifex.CONTRACT_CANDIDATES.items():
         specs.append((
-            f"期貨三大法人未平倉 {contract}", taifex.URL, None,
+            f"期貨三大法人未平倉 {label}", taifex.URL, None,
             {"firstDate": stamp, "lastDate": stamp, "queryStartDate": stamp,
-             "queryEndDate": stamp, "commodityId": contract},
+             "queryEndDate": stamp, "commodityId": candidates[0]},
             _taifex,
         ))
 

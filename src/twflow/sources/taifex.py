@@ -15,7 +15,7 @@ import csv
 import datetime as dt
 import io
 
-from ..errors import ParseError
+from ..errors import ParseError, TwflowError
 from ..httpclient import Fetcher
 from ..tradingcal import roc_to_date
 from .twse_common import to_float
@@ -24,7 +24,15 @@ URL = "https://www.taifex.com.tw/cht/3/futContractsDateDown"
 SOURCE = "taifex"
 
 # 預設只抓台指期與小台——這兩個最能代表法人對大盤的方向判斷。
-DEFAULT_CONTRACTS = ("TX", "MTX")
+#
+# 期交所對「契約代號」有兩套寫法（TX / TXF），而且不同端點用的不一樣。
+# 實測用 TX 會拿到一個 HTML 錯誤頁而不是 CSV，所以每個契約都準備了
+# 候選代號，依序試到能解析為止。
+CONTRACT_CANDIDATES = {
+    "臺股期貨": ("TXF", "TX"),
+    "小型臺指期貨": ("MXF", "MTX"),
+}
+DEFAULT_CONTRACTS = tuple(CONTRACT_CANDIDATES)
 
 PARTY_ALIASES = {
     "自營商": "自營商",
@@ -132,19 +140,41 @@ def parse(text: str) -> list[dict]:
 
 def fetch(fetcher: Fetcher, day: dt.date, contracts=DEFAULT_CONTRACTS) -> list[dict]:
     stamp = day.strftime("%Y/%m/%d")
+    headers = {"Referer": "https://www.taifex.com.tw/cht/3/futContractsDate"}
     out: list[dict] = []
-    for contract in contracts:
-        resp = fetcher.get(
-            URL,
-            method="POST",
-            data={
-                "firstDate": stamp,
-                "lastDate": stamp,
-                "queryStartDate": stamp,
-                "queryEndDate": stamp,
-                "commodityId": contract,
-            },
-            headers={"Referer": "https://www.taifex.com.tw/cht/3/futContractsDate"},
+    errors: list[str] = []
+
+    for label in contracts:
+        candidates = CONTRACT_CANDIDATES.get(label, (label,))
+        got = False
+        for code in candidates:
+            try:
+                resp = fetcher.get(
+                    URL,
+                    method="POST",
+                    data={
+                        "firstDate": stamp,
+                        "lastDate": stamp,
+                        "queryStartDate": stamp,
+                        "queryEndDate": stamp,
+                        "commodityId": code,
+                    },
+                    headers=headers,
+                )
+                rows = parse(resp.text)
+            except TwflowError as exc:
+                errors.append(f"{label}/{code}: {exc}")
+                continue
+            out.extend(rows)
+            got = True
+            break
+        if not got:
+            continue
+
+    if not out:
+        raise ParseError(
+            SOURCE,
+            "所有契約代號都拿不到 CSV",
+            observed=" | ".join(errors)[:500],
         )
-        out.extend(parse(resp.text))
     return out
