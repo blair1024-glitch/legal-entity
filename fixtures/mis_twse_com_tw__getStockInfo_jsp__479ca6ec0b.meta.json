@@ -1,0 +1,12 @@
+{
+  "label": "MIS 盤中即時報價",
+  "url": "https://mis.twse.com.tw/stock/api/getStockInfo.jsp",
+  "params": {
+    "ex_ch": "tse_2330.tw|tse_2317.tw",
+    "json": "1",
+    "delay": "0"
+  },
+  "body": {},
+  "synthetic": true,
+  "note": "合成樣本：欄位結構依公開文件與社群慣例推斷，數值為假。在有外網的機器上執行 `twflow record` 會以真實回應覆蓋。"
+}

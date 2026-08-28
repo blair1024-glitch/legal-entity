@@ -1,0 +1,38 @@
+# twflow 設定範例。複製成 config.yaml 後修改。
+# 只需要寫想覆蓋的項目，其餘沿用 src/twflow/config.py 的 DEFAULTS。
+
+# live   = 真的連網抓資料（你的電腦）
+# fixture= 完全離線，讀 fixtures/ 樣本（開發、CI）
+# record = 連網並把回應錄進 fixtures/
+mode: live
+
+db_path: data/twflow.db
+markets: [TWSE, TPEX]
+
+poll:
+  interval_seconds: 60   # 全市場掃一輪的目標週期
+  batch_size: 50         # 單次 MIS 請求帶幾檔；證交所限流約 3 requests / 5 秒
+  universe: all          # all = 全市場；watchlist = 只掃自選股（更新更快）
+
+flow:
+  burst_lot_threshold: 100   # 爆量門檻（張，非單筆大單——見 README）
+  midpoint_rule: proportional
+  apply_calibration: true  # 套用盤後迴歸得到的每檔校準係數
+
+quadrant:
+  momentum_window_minutes: 30
+  min_constituents: 2
+  min_turnover: 10000000
+
+watchlist:
+  - "2330"   # 台積電
+  - "2317"   # 鴻海
+  - "2454"   # 聯發科
+  - "2308"   # 台達電
+  - "3231"   # 緯創
+
+retention_days: 30
+
+server:
+  host: 127.0.0.1
+  port: 8000

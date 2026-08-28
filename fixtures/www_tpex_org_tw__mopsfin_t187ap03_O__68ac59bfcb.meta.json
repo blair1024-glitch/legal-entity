@@ -1,0 +1,8 @@
+{
+  "label": "上櫃公司基本資料",
+  "url": "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O",
+  "params": {},
+  "body": {},
+  "synthetic": true,
+  "note": "合成樣本：欄位結構依公開文件與社群慣例推斷，數值為假。在有外網的機器上執行 `twflow record` 會以真實回應覆蓋。"
+}

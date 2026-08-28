@@ -1,0 +1,1 @@
+[{"SecuritiesCompanyCode": "6488", "CompanyName": "環球晶", "SecuritiesIndustryCode": "24"}, {"SecuritiesCompanyCode": "5483", "CompanyName": "中美晶", "SecuritiesIndustryCode": "24"}]

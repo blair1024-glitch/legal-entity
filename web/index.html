@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>台股法人資金流向 · 板塊輪動</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <h1>板塊輪動</h1>
+    <span class="sub">台股法人資金流向</span>
+  </div>
+  <div class="status" id="status">
+    <span class="pill" id="session-pill">載入中…</span>
+    <span class="meta" id="meta-line"></span>
+  </div>
+</header>
+
+<div class="banner" id="disclaimer-banner">
+  <strong>盤中數字是推估值，不是官方法人買賣超。</strong>
+  <span id="disclaimer-text"></span>
+  <button class="link" id="explain-toggle">怎麼看這張表 ▾</button>
+</div>
+
+<section class="explainer" id="explainer" hidden>
+  <h2>怎麼看這張表</h2>
+
+  <div class="explainer-grid">
+    <div>
+      <h3>這張圖在說什麼</h3>
+      <p>
+        每一個泡泡是一個<b>板塊</b>（例如晶圓代工、AI 伺服器、金控）。
+        位置由兩個問題決定：
+      </p>
+      <ul>
+        <li><b>橫軸 · 強度</b>：今天資金是淨流入還是淨流出？<br>
+            往右＝買方比較積極，往左＝賣方比較積極。</li>
+        <li><b>縱軸 · 動能</b>：這股力道正在變強還是變弱？<br>
+            往上＝比前一段時間更積極，往下＝力道在消退。</li>
+      </ul>
+      <p class="note">
+        強度用的是「淨流入佔該板塊成交值的比重」，不是絕對金額。
+        這樣半導體和水泥才能放在同一張圖上比較——否則台積電所屬的板塊
+        會永遠在角落，其他板塊全部擠成一團。
+      </p>
+    </div>
+
+    <div>
+      <h3>四個象限</h3>
+      <table class="quad-table">
+        <tr><td class="q q-accel-in">加速流入</td>
+            <td>資金持續買進，而且越買越積極。<br><span class="note">動能最強的位置。</span></td></tr>
+        <tr><td class="q q-slowing-in">流入但放緩</td>
+            <td>還在買，但力道正在減弱。<br><span class="note">可能是行情接近尾聲的訊號。</span></td></tr>
+        <tr><td class="q q-accel-out">加速流出</td>
+            <td>賣壓持續，而且越來越重。<br><span class="note">最需要留意的位置。</span></td></tr>
+        <tr><td class="q q-slowing-out">流出但放緩</td>
+            <td>還在賣，但賣壓正在收斂。<br><span class="note">有時是落底的早期跡象。</span></td></tr>
+      </table>
+    </div>
+
+    <div class="explainer-caveat">
+      <h3>這些數字的可信度到哪裡</h3>
+      <p>
+        台股<b>沒有</b>公開的盤中法人買賣超資料。證交所的三大法人逐檔買賣超
+        （T86）要收盤後才發布，券商分點也是盤後、而且需要通過驗證碼。
+      </p>
+      <p>
+        所以盤中看到的「資金流」是<b>推估</b>出來的：把成交價和當時的委買
+        委賣價比對，成交在賣價附近算「主動買」、成交在買價附近算「主動賣」，
+        再乘上成交金額。這是業界常用的方法，但有三個必須知道的限制：
+      </p>
+      <ul>
+        <li><b>主動買 ≠ 法人買。</b>主動方可能是散戶、當沖客或程式單。
+            這只是「誰比較急著成交」的代理指標。</li>
+        <li><b>資料是快照不是逐筆。</b>報價每幾秒才更新一次，一段區間內的
+            多筆成交只能用一個價格代表。</li>
+        <li><b>爆量 ≠ 大單。</b>快照看不到個別委託的大小。</li>
+      </ul>
+      <p>
+        因此每天收盤後，系統會把當天的推估值和官方三大法人買賣超做比對，
+        算出<b>推估準確度</b>顯示在右上角。這個數字就是要讓你自己判斷
+        今天的圖能信到什麼程度——它不會永遠是高的。
+      </p>
+      <p class="warn">本工具僅供研究參考，不構成任何投資建議。</p>
+    </div>
+  </div>
+</section>
+
+<main>
+  <section class="card chart-card">
+    <div class="card-head">
+      <h2>板塊資金流四象限</h2>
+      <div class="controls">
+        <label>動能視窗
+          <select id="window-select">
+            <option value="15">15 分鐘</option>
+            <option value="30" selected>30 分鐘</option>
+            <option value="60">60 分鐘</option>
+          </select>
+        </label>
+        <span class="accuracy" id="accuracy-badge"></span>
+      </div>
+    </div>
+    <div id="quadrant-chart" class="chart"></div>
+    <p class="chart-foot">
+      泡泡大小＝該板塊成交值　·　顏色＝所屬象限　·　滑鼠移上去看細節
+    </p>
+  </section>
+
+  <div class="two-col">
+    <section class="card">
+      <div class="card-head">
+        <h2>板塊排行</h2>
+        <span class="tag est">推估</span>
+      </div>
+      <div id="sector-rank" class="rank-list"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>個股資金流排行</h2>
+        <span class="tag est">推估</span>
+      </div>
+      <div id="stock-rank" class="rank-list"></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>自選股</h2>
+      <span class="tag">盤中推估與盤後官方數字並列</span>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table" id="watchlist-table">
+        <thead>
+          <tr>
+            <th>代號</th><th>名稱</th><th>板塊</th>
+            <th class="num">股價</th>
+            <th class="num est-col">盤中推估淨流<span class="hint">推估</span></th>
+            <th class="num">外資持股比率</th>
+            <th class="num official-col">外資買賣超<span class="hint">官方</span></th>
+            <th class="num official-col">投信買賣超<span class="hint">官方</span></th>
+            <th class="num official-col">三大法人合計<span class="hint">官方</span></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="two-col">
+    <section class="card">
+      <div class="card-head">
+        <h2>三大法人買賣超</h2>
+        <span class="tag official">官方</span>
+      </div>
+      <div id="insti-rank" class="rank-list"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>期貨法人未平倉</h2>
+        <span class="tag official">官方</span>
+      </div>
+      <div id="futures-panel" class="panel"></div>
+
+      <div class="card-head" style="margin-top:1.25rem">
+        <h2>官股動向</h2>
+        <span class="tag official">官方（選配）</span>
+      </div>
+      <div id="brokers-panel" class="panel"></div>
+    </section>
+  </div>
+</main>
+
+<footer>
+  <p>
+    資料來源：臺灣證券交易所、證券櫃檯買賣中心、臺灣期貨交易所。
+    盤中資金流為本工具推估值。<b>本工具僅供研究參考，不構成投資建議。</b>
+  </p>
+</footer>
+
+<script src="/static/vendor/echarts.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

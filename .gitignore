@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# 本機資料庫與設定
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/*.db-journal
+config.yaml
+
+# 手動下載的券商分點 CSV
+data/bsr/*.csv

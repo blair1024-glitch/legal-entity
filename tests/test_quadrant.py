@@ -1,0 +1,225 @@
+"""四象限分類測試.
+
+用構造的資金流序列驗證象限判定——每個案例都設計成「這個板塊在前半段和
+後半段各發生了什麼」，然後斷言它應該落在哪一象限。
+"""
+
+import datetime as dt
+
+import pytest
+
+from twflow.quadrant import (
+    QUADRANT_ACCEL_IN,
+    QUADRANT_ACCEL_OUT,
+    QUADRANT_SLOWING_IN,
+    QUADRANT_SLOWING_OUT,
+    classify_quadrant,
+    compute_quadrants,
+    rank_stocks,
+)
+from twflow.sectors import SectorMap, aggregate_by_sector
+
+BASE = dt.datetime(2026, 8, 27, 10, 0, 0)
+
+
+def smap(mapping=None, official=None):
+    m = SectorMap()
+    for code, sector in (mapping or {}).items():
+        m.by_code[code] = sector
+        m.source[code] = "custom"
+    for code, sector in (official or {}).items():
+        m.by_code[code] = sector
+        m.source[code] = "official"
+    return m
+
+
+def row(code, minutes, net, turnover, burst=0.0, price=100.0):
+    return {
+        "code": code,
+        "minute_ts": (BASE + dt.timedelta(minutes=minutes)).isoformat(),
+        "net_value": net,
+        "turnover_value": turnover,
+        "burst_net_value": burst,
+        "last_price": price,
+    }
+
+
+class TestClassifyQuadrant:
+    def test_inflow_accelerating(self):
+        assert classify_quadrant(0.2, 0.1) == QUADRANT_ACCEL_IN
+
+    def test_inflow_slowing(self):
+        assert classify_quadrant(0.2, -0.1) == QUADRANT_SLOWING_IN
+
+    def test_outflow_accelerating(self):
+        # 賣壓越來越重：強度為負，動能也為負（更負）
+        assert classify_quadrant(-0.2, -0.1) == QUADRANT_ACCEL_OUT
+
+    def test_outflow_slowing(self):
+        # 還在賣但賣壓收斂：強度為負，動能轉正
+        assert classify_quadrant(-0.2, 0.1) == QUADRANT_SLOWING_OUT
+
+    @pytest.mark.parametrize("strength,momentum,expected", [
+        (0.0, 0.0, QUADRANT_ACCEL_OUT),
+        (0.1, 0.0, QUADRANT_SLOWING_IN),
+        (-0.1, 0.0, QUADRANT_ACCEL_OUT),
+    ])
+    def test_zero_boundaries_lean_conservative(self, strength, momentum, expected):
+        # 打平時不宣稱「在加速」——那樣比較容易誤導
+        assert classify_quadrant(strength, momentum) == expected
+
+
+class TestComputeQuadrants:
+    def test_accelerating_inflow_is_detected(self):
+        # 前 30 分鐘小買，後 30 分鐘大買 → 加速流入
+        m = smap({"A1": "測試板塊", "A2": "測試板塊"})
+        rows = [
+            row("A1", 5, net=10, turnover=1000),
+            row("A2", 5, net=10, turnover=1000),
+            row("A1", 45, net=300, turnover=1000),
+            row("A2", 45, net=300, turnover=1000),
+        ]
+        pts = compute_quadrants(rows, m, window_minutes=30, min_constituents=2)
+        assert len(pts) == 1
+        assert pts[0].quadrant == QUADRANT_ACCEL_IN
+        assert pts[0].momentum > 0
+
+    def test_slowing_inflow_is_detected(self):
+        # 前段大買、後段小買 → 還是淨流入，但力道減弱
+        m = smap({"A1": "測試板塊", "A2": "測試板塊"})
+        rows = [
+            row("A1", 5, net=400, turnover=1000),
+            row("A2", 5, net=400, turnover=1000),
+            row("A1", 45, net=20, turnover=1000),
+            row("A2", 45, net=20, turnover=1000),
+        ]
+        pts = compute_quadrants(rows, m, window_minutes=30, min_constituents=2)
+        assert pts[0].strength > 0
+        assert pts[0].momentum < 0
+        assert pts[0].quadrant == QUADRANT_SLOWING_IN
+
+    def test_accelerating_outflow_is_detected(self):
+        m = smap({"A1": "測試板塊", "A2": "測試板塊"})
+        rows = [
+            row("A1", 5, net=-10, turnover=1000),
+            row("A2", 5, net=-10, turnover=1000),
+            row("A1", 45, net=-400, turnover=1000),
+            row("A2", 45, net=-400, turnover=1000),
+        ]
+        pts = compute_quadrants(rows, m, window_minutes=30, min_constituents=2)
+        assert pts[0].quadrant == QUADRANT_ACCEL_OUT
+
+    def test_slowing_outflow_is_detected(self):
+        m = smap({"A1": "測試板塊", "A2": "測試板塊"})
+        rows = [
+            row("A1", 5, net=-400, turnover=1000),
+            row("A2", 5, net=-400, turnover=1000),
+            row("A1", 45, net=-10, turnover=1000),
+            row("A2", 45, net=-10, turnover=1000),
+        ]
+        pts = compute_quadrants(rows, m, window_minutes=30, min_constituents=2)
+        assert pts[0].strength < 0
+        assert pts[0].momentum > 0
+        assert pts[0].quadrant == QUADRANT_SLOWING_OUT
+
+    def test_strength_is_normalised_so_sectors_are_comparable(self):
+        # 大板塊金額大 10 倍但比重相同 → 強度應該一樣，不該霸佔圖的一角
+        m = smap({"BIG1": "大", "BIG2": "大", "SML1": "小", "SML2": "小"})
+        rows = [
+            row("BIG1", 5, net=1000, turnover=10000),
+            row("BIG2", 5, net=1000, turnover=10000),
+            row("SML1", 5, net=100, turnover=1000),
+            row("SML2", 5, net=100, turnover=1000),
+        ]
+        pts = {p.sector: p for p in compute_quadrants(rows, m, min_constituents=2)}
+        assert pts["大"].strength == pytest.approx(pts["小"].strength)
+
+    def test_filters_sectors_with_too_few_constituents(self):
+        m = smap({"A1": "單檔板塊", "B1": "雙檔板塊", "B2": "雙檔板塊"})
+        rows = [
+            row("A1", 5, net=100, turnover=1000),
+            row("B1", 5, net=100, turnover=1000),
+            row("B2", 5, net=100, turnover=1000),
+        ]
+        pts = compute_quadrants(rows, m, min_constituents=2)
+        assert [p.sector for p in pts] == ["雙檔板塊"]
+
+    def test_filters_sectors_below_turnover_floor(self):
+        m = smap({"A1": "冷門", "A2": "冷門"})
+        rows = [row("A1", 5, net=1, turnover=10), row("A2", 5, net=1, turnover=10)]
+        assert compute_quadrants(rows, m, min_constituents=2, min_turnover=1000) == []
+
+    def test_applies_calibration_coefficients(self):
+        m = smap({"A1": "板塊", "A2": "板塊"})
+        rows = [row("A1", 5, net=100, turnover=1000), row("A2", 5, net=100, turnover=1000)]
+        plain = compute_quadrants(rows, m, min_constituents=2)[0]
+        scaled = compute_quadrants(rows, m, min_constituents=2, calibration={"A1": 0.5})[0]
+        assert scaled.net_value == pytest.approx(plain.net_value - 50)
+        # 成交值是實測值，不該被校準係數改動
+        assert scaled.turnover_value == pytest.approx(plain.turnover_value)
+
+    def test_empty_input_yields_no_points(self):
+        assert compute_quadrants([], smap()) == []
+
+    def test_window_uses_latest_timestamp_when_now_absent(self):
+        # 收盤後回看歷史某天，視窗要相對於當天最後一筆而不是「現在」
+        m = smap({"A1": "板塊", "A2": "板塊"})
+        rows = [
+            row("A1", 0, net=10, turnover=1000),
+            row("A2", 0, net=10, turnover=1000),
+            row("A1", 50, net=500, turnover=1000),
+            row("A2", 50, net=500, turnover=1000),
+        ]
+        pts = compute_quadrants(rows, m, window_minutes=30, min_constituents=2)
+        assert pts[0].momentum > 0
+
+
+class TestSectorAggregation:
+    def test_falls_back_to_official_industry(self):
+        m = smap({"2330": "晶圓代工"}, official={"1101": "水泥工業"})
+        assert m.sector_of("2330") == "晶圓代工"
+        assert m.sector_of("1101") == "水泥工業"
+        assert m.is_custom("2330") is True
+        assert m.is_custom("1101") is False
+
+    def test_unknown_code_is_not_silently_dropped(self):
+        assert smap().sector_of("9999") == "未分類"
+
+    def test_aggregate_counts_distinct_constituents(self):
+        m = smap({"A1": "板塊", "A2": "板塊"})
+        rows = [
+            row("A1", 5, net=10, turnover=100),
+            row("A1", 6, net=10, turnover=100),
+            row("A2", 5, net=10, turnover=100),
+        ]
+        agg = aggregate_by_sector(rows, m)
+        assert agg["板塊"].constituents == 2
+        assert agg["板塊"].net_value == 30
+
+    def test_sector_strength_handles_zero_turnover(self):
+        m = smap({"A1": "板塊"})
+        agg = aggregate_by_sector([row("A1", 5, net=0, turnover=0)], m)
+        assert agg["板塊"].strength == 0.0
+
+
+class TestRankStocks:
+    def test_ranks_by_net_value_descending(self):
+        m = smap({"A": "S", "B": "S", "C": "S"})
+        rows = [
+            row("A", 1, net=100, turnover=1000),
+            row("B", 1, net=-50, turnover=1000),
+            row("C", 1, net=300, turnover=1000),
+        ]
+        out = rank_stocks(rows, m, limit=0)
+        assert [r["code"] for r in out] == ["C", "A", "B"]
+
+    def test_accumulates_across_minutes_and_keeps_latest_price(self):
+        m = smap({"A": "S"})
+        rows = [
+            row("A", 1, net=100, turnover=1000, price=10.0),
+            row("A", 2, net=50, turnover=500, price=11.0),
+        ]
+        out = rank_stocks(rows, m, limit=0)
+        assert out[0]["net_value"] == 150
+        assert out[0]["turnover_value"] == 1500
+        assert out[0]["last_price"] == 11.0

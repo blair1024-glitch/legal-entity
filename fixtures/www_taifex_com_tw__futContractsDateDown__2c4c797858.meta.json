@@ -1,0 +1,14 @@
+{
+  "label": "期貨三大法人未平倉 MTX",
+  "url": "https://www.taifex.com.tw/cht/3/futContractsDateDown",
+  "params": {},
+  "body": {
+    "firstDate": "2026/08/27",
+    "lastDate": "2026/08/27",
+    "queryStartDate": "2026/08/27",
+    "queryEndDate": "2026/08/27",
+    "commodityId": "MTX"
+  },
+  "synthetic": true,
+  "note": "合成樣本：欄位結構依公開文件與社群慣例推斷，數值為假。在有外網的機器上執行 `twflow record` 會以真實回應覆蓋。"
+}

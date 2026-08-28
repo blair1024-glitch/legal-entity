@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "twflow"
+version = "0.1.0"
+description = "台股法人資金流向儀表板：盤中推估 + 盤後官方數據校準"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "requests>=2.31",
+    "PyYAML>=6.0",
+]
+
+[project.scripts]
+twflow = "twflow.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

@@ -1,0 +1,12 @@
+{
+  "label": "外資持股比率 MI_QFIIS",
+  "url": "https://www.twse.com.tw/rwd/zh/fund/MI_QFIIS",
+  "params": {
+    "date": "20260827",
+    "selectType": "ALL",
+    "response": "json"
+  },
+  "body": {},
+  "synthetic": true,
+  "note": "合成樣本：欄位結構依公開文件與社群慣例推斷，數值為假。在有外網的機器上執行 `twflow record` 會以真實回應覆蓋。"
+}
