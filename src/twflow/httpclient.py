@@ -141,6 +141,9 @@ class Fetcher:
     rate_limits: dict[str, tuple[int, float]] = field(default_factory=dict)
     _limiters: dict[str, RateLimiter] = field(default_factory=dict, init=False)
     _session: requests.Session | None = field(default=None, init=False)
+    # 保留最近幾次的原始回應，讓 `doctor --dump` 能把伺服器實際吐回來的東西
+    # 印出來。解析失敗時，這通常比錯誤訊息本身更能說明問題。
+    recent: list[tuple[str, str]] = field(default_factory=list, init=False)
 
     def __post_init__(self) -> None:
         if self.mode not in {"live", "fixture", "record"}:
@@ -195,9 +198,12 @@ class Fetcher:
                     f"  url={url} params={params}\n"
                     f"  請在有外網的機器上執行 `twflow record` 產生樣本。"
                 )
-            return Response(url=url, status=200, text=path.read_text("utf-8"), from_fixture=True)
+            text = path.read_text("utf-8")
+            self._remember(url, text)
+            return Response(url=url, status=200, text=text, from_fixture=True)
 
         resp = self._fetch_live(url, params, headers, method, data)
+        self._remember(resp.url, resp.text)
 
         if self.mode == "record":
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -219,6 +225,10 @@ class Fetcher:
                 encoding="utf-8",
             )
         return resp
+
+    def _remember(self, url: str, text: str, keep: int = 12) -> None:
+        self.recent.append((url, text))
+        del self.recent[:-keep]
 
     def _fetch_live(
         self,

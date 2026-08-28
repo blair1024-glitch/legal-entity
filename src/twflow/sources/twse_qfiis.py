@@ -55,7 +55,17 @@ def parse(text: str) -> list[dict]:
         )
 
     if not out:
-        raise ParseError(SOURCE, "解析後沒有任何持股資料（可能是非交易日）", observed=len(rows))
+        if not rows:
+            raise ParseError(
+                SOURCE,
+                "回應裡沒有任何資料列——該日尚未發布，或 selectType 參數不適用",
+                observed=f"fields={fields[:6]}",
+            )
+        raise ParseError(
+            SOURCE,
+            f"有 {len(rows)} 列資料，但沒有一列是 4 碼普通股代號",
+            observed=rows[0][:4] if rows else None,
+        )
     return out
 
 

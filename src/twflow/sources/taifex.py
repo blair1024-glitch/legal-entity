@@ -50,7 +50,20 @@ def parse(text: str) -> list[dict]:
     欄位很多且名稱冗長，一律以關鍵字定位。重點在「未平倉」而非「交易」——
     未平倉才代表法人手上實際的部位方向。
     """
-    text = text.lstrip("﻿")
+    text = text.lstrip("﻿").lstrip()
+
+    # 期交所在參數不對、或改版之後，會回傳一個 HTML 網頁而不是 CSV。
+    # 這時候說「CSV 缺少欄位」會把人引導到錯的方向——真正的問題是
+    # 根本沒拿到 CSV。
+    head = text[:400].lower()
+    if head.startswith("<!doctype") or head.startswith("<html") or "<body" in head:
+        raise ParseError(
+            SOURCE,
+            "伺服器回傳的是 HTML 網頁，不是 CSV——通常代表 POST 參數"
+            "（commodityId 或日期欄位）與現行介面不符",
+            observed=text[:300].replace("\n", " "),
+        )
+
     reader = csv.reader(io.StringIO(text))
     rows = [r for r in reader if r and any(c.strip() for c in r)]
     if len(rows) < 2:

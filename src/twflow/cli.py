@@ -105,6 +105,12 @@ def cmd_doctor(args, config: Config) -> int:
             observed = getattr(exc, "observed", None)
             if observed:
                 print(f"    實際觀察到: {str(observed)[:400]}")
+            if args.dump and fetcher.recent:
+                url, body = fetcher.recent[-1]
+                print(f"    ── 伺服器原始回應 ({url}) ──")
+                for line in body[: args.dump].splitlines()[:14]:
+                    print(f"    │ {line[:150]}")
+                print(f"    └── 共 {len(body)} 字元")
         except Exception as exc:  # noqa: BLE001
             failures += 1
             print(f"✗ {name}\n    未預期的錯誤: {exc!r}")
@@ -140,6 +146,7 @@ def cmd_doctor(args, config: Config) -> int:
 def cmd_record(args, config: Config) -> int:
     """把真實回應錄進 fixtures/，讓離線測試跑在真實結構上."""
     args.mode = "record"
+    args.dump = getattr(args, "dump", 0)
     print("以 record 模式抓取，回應會寫入 fixtures/ …")
     rc = cmd_doctor(args, config)
     print("錄製完成。接著執行 `pytest` ——這一步會用真實樣本檢驗 parser。")
@@ -334,6 +341,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     d = sub.add_parser("doctor", help="檢查資料來源可達性與欄位結構")
     d.add_argument("--date", help="檢查用的交易日 YYYY-MM-DD")
+    d.add_argument(
+        "--dump", nargs="?", type=int, const=800, default=0,
+        metavar="N",
+        help="失敗時印出伺服器原始回應的前 N 個字元（預設 800），用來查明真正的原因",
+    )
     d.set_defaults(func=cmd_doctor)
 
     r = sub.add_parser("record", help="錄製真實回應到 fixtures/")
