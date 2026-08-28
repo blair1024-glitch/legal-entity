@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .calibrate import accuracy_summary
 from .config import Config
-from .quadrant import compute_quadrants, rank_stocks
+from .quadrant import compute_quadrants, compute_trail, rank_stocks
 from .sectors import SectorMap
 from .sources.bsr import state_broker_summary
 from .store import Store
@@ -55,7 +55,13 @@ def create_app(store: Store, config: Config) -> FastAPI:
     # ---------- 盤中 ----------
 
     @app.get("/api/quadrant")
-    def quadrant(date: str | None = None, window: int | None = None):
+    def quadrant(
+        date: str | None = None,
+        window: int | None = None,
+        trail: int = Query(0, ge=0, le=12),
+        trail_step: int = Query(10, ge=1, le=60),
+        trail_top: int = Query(10, ge=1, le=40),
+    ):
         """四象限板塊輪動：每個板塊的資金流強度與動能."""
         trade_date = resolve_date(date)
         rows = store.flow_rows(trade_date)
@@ -74,11 +80,28 @@ def create_app(store: Store, config: Config) -> FastAPI:
         effective = points[0].momentum_window_minutes if points else float(requested_window)
         unknown = sum(1 for p in points if not p.momentum_known)
 
+        # 輪動軌跡：只算前幾名板塊，全部畫線會糊成一團
+        trails: dict = {}
+        if trail > 0 and points:
+            ranked = sorted(points, key=lambda p: abs(p.net_value), reverse=True)
+            trails = compute_trail(
+                rows,
+                smap,
+                window_minutes=int(window or config.get("quadrant.momentum_window_minutes", 30)),
+                steps=trail,
+                step_minutes=trail_step,
+                sectors={p.sector for p in ranked[:trail_top]},
+                min_constituents=int(config.get("quadrant.min_constituents", 2)),
+                min_turnover=float(config.get("quadrant.min_turnover", 0)),
+                calibration=calibration(),
+            )
+
         return {
             "trade_date": trade_date,
             "as_of": rows[-1]["minute_ts"] if rows else None,
             "session_open": is_session_open(),
             "window_minutes": requested_window,
+            "trail": trails,
             "effective_window_minutes": round(effective, 1),
             "window_shortened": effective < requested_window - 0.05,
             "momentum_unknown_sectors": unknown,

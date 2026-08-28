@@ -66,6 +66,23 @@
       </table>
     </div>
 
+    <div>
+      <h3>輪動軌跡</h3>
+      <p>
+        四象限圖是某一瞬間的切片，看不出「這個板塊是從哪裡移動過來的」——
+        但輪動的重點正是<b>移動方向</b>。
+      </p>
+      <p>
+        勾選「顯示輪動軌跡」後，前 6 大板塊會拉出一條尾巴，串起它在過去
+        每隔一段時間的位置，線的末端就是現在。同樣落在「加速流入」，
+        一個是從左下角一路衝上來、另一個是從更高處掉下來，意義完全不同。
+      </p>
+      <p class="note">
+        每個軌跡點都是用「當時為止的資料」重算的，等於當時的儀表板真的會
+        顯示的位置，不是事後回推。
+      </p>
+    </div>
+
     <div class="explainer-caveat">
       <h3>這些數字的可信度到哪裡</h3>
       <p>
@@ -106,13 +123,18 @@
             <option value="60">60 分鐘</option>
           </select>
         </label>
+        <label class="check">
+          <input type="checkbox" id="trail-toggle">
+          顯示輪動軌跡
+        </label>
         <span class="accuracy" id="accuracy-badge"></span>
         <span class="window-note" id="window-note" hidden></span>
       </div>
     </div>
     <div id="quadrant-chart" class="chart"></div>
     <p class="chart-foot">
-      泡泡大小＝該板塊成交值　·　顏色＝所屬象限　·　滑鼠移上去看細節
+      泡泡大小＝該板塊成交值　·　顏色＝所屬象限　·　滑鼠移上去看細節<br>
+      <span id="trail-foot" hidden>軌跡顯示前 6 大板塊過去 100 分鐘走過的位置　·　點越大越接近現在</span>
     </p>
   </section>
 

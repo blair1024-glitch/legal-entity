@@ -78,8 +78,39 @@ function renderQuadrant(data) {
   const bubble = t => 12 + 34 * Math.sqrt(t / maxTurnover);
 
   // 座標軸範圍取對稱，讓原點永遠在正中央，四個象限面積相等
-  const maxX = Math.max(...points.map(p => Math.abs(p.strength)), 0.02) * 1.25;
-  const maxY = Math.max(...points.map(p => Math.abs(p.momentum)), 0.01) * 1.25;
+  const trailPts = Object.values(data.trail || {}).flat();
+  const allX = points.map(p => Math.abs(p.strength)).concat(trailPts.map(p => Math.abs(p.strength)));
+  const allY = points.map(p => Math.abs(p.momentum)).concat(trailPts.map(p => Math.abs(p.momentum)));
+  const maxX = Math.max(...allX, 0.02) * 1.25;
+  const maxY = Math.max(...allY, 0.01) * 1.25;
+
+  // 輪動軌跡：每個板塊一條線，串起它過去走過的位置。線的末端是現在。
+  // 用板塊「當下」的象限顏色，這樣一眼看得出它是往哪個狀態移動。
+  const trails = data.trail || {};
+  const quadrantOf = Object.fromEntries(points.map(p => [p.sector, p.quadrant]));
+  const trailSeries = Object.entries(trails)
+    .filter(([, path]) => path.length > 1)
+    .map(([sector, path]) => {
+      const color = QUADRANT_COLORS[quadrantOf[sector]] || '#6e7b8a';
+      return {
+        name: `軌跡-${sector}`,
+        type: 'line',
+        silent: true,
+        // 動能是兩個視窗相減，本來就會上下跳動。稍微平滑化只是讓「走向」
+        // 看得出來，端點座標仍然是實際算出來的值。
+        smooth: 0.4,
+        showSymbol: true,
+        z: 1,
+        data: path.map((pt, i) => ({
+          value: [pt.strength, pt.momentum],
+          // 點越靠近現在越大越實，讓時間方向一眼看得出來
+          symbolSize: 2 + (i / (path.length - 1)) * 4,
+          itemStyle: { color, opacity: 0.25 + (i / (path.length - 1)) * 0.55 },
+        })),
+        lineStyle: { color, width: 1.4, opacity: 0.4 },
+        tooltip: { show: false },
+      };
+    });
 
   const series = Object.keys(QUADRANT_COLORS).map(q => ({
     name: q,
@@ -113,6 +144,7 @@ function renderQuadrant(data) {
   chart.setOption({
     backgroundColor: 'transparent',
     legend: {
+      // 只列四象限＋待觀察，軌跡線不進圖例（會塞爆）
       data: Object.keys(QUADRANT_COLORS),
       textStyle: { color: '#9aa7b4', fontSize: 11 },
       top: 0, itemWidth: 10, itemHeight: 10,
@@ -171,6 +203,7 @@ function renderQuadrant(data) {
         },
         data: [],
       },
+      ...trailSeries,
       ...series,
     ],
   }, { notMerge: true });
@@ -206,7 +239,11 @@ function quadrantBadge(p) {
 
 async function loadQuadrant() {
   const win = document.getElementById('window-select').value;
-  const data = await getJSON(`/api/quadrant?window=${win}`);
+  const showTrail = document.getElementById('trail-toggle').checked;
+  const trail = showTrail ? '&trail=6&trail_step=20&trail_top=6' : '';
+  const data = await getJSON(`/api/quadrant?window=${win}${trail}`);
+
+  document.getElementById('trail-foot').hidden = !showTrail;
 
   renderQuadrant(data);
   document.getElementById('disclaimer-text').textContent = data.disclaimer || '';
@@ -365,6 +402,7 @@ document.getElementById('explain-toggle').addEventListener('click', e => {
 });
 
 document.getElementById('window-select').addEventListener('change', loadQuadrant);
+document.getElementById('trail-toggle').addEventListener('change', loadQuadrant);
 window.addEventListener('resize', () => chart.resize());
 
 refreshAll();

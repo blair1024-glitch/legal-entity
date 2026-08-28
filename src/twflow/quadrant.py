@@ -307,3 +307,73 @@ def rank_stocks(
         return ranked
     # 頭尾各取 limit 檔：買超榜與賣超榜都要看得到
     return ranked[:limit] + ranked[-limit:] if len(ranked) > limit * 2 else ranked
+
+
+def compute_trail(
+    flow_rows: list,
+    sector_map: SectorMap,
+    *,
+    now: dt.datetime | None = None,
+    window_minutes: int = 30,
+    steps: int = 6,
+    step_minutes: int = 10,
+    sectors: set[str] | None = None,
+    **kwargs,
+) -> dict[str, list[dict]]:
+    """算出每個板塊過去幾個時間點的座標，用來畫「輪動軌跡」.
+
+    四象限圖只是某一瞬間的切片，看不出「這個板塊是從哪裡移動過來的」——
+    但輪動的重點正是移動方向。軌跡把過去 ``steps × step_minutes`` 分鐘內的
+    位置串起來，一眼就能看出某個板塊是正在往加速流入靠攏，還是剛從那裡掉下來。
+
+    做法是把「當下」往回倒帶，每次只餵入該時間點之前的資料重算一次座標——
+    這樣算出來的每個軌跡點，都等於當時的儀表板真的會顯示的位置。
+
+    Parameters
+    ----------
+    sectors:
+        只算這些板塊的軌跡。全部板塊都畫線會糊成一團，通常只畫前幾名。
+
+    Returns
+    -------
+    ``{板塊名稱: [{"t":…, "strength":…, "momentum":…}, …]}``，由舊到新。
+    """
+    if steps < 1 or step_minutes < 1:
+        return {}
+
+    parsed: list[tuple[dt.datetime, object]] = []
+    for row in flow_rows:
+        get = row.get if isinstance(row, dict) else row.__getitem__
+        ts = _parse_ts(get("minute_ts"))
+        if ts is not None:
+            parsed.append((ts, row))
+    if not parsed:
+        return {}
+
+    parsed.sort(key=lambda pair: pair[0])
+    if now is None:
+        now = parsed[-1][0]
+
+    trail: dict[str, list[dict]] = {}
+    # 由舊到新，讓前端可以直接照順序連線
+    for i in range(steps - 1, -1, -1):
+        cutoff = now - dt.timedelta(minutes=step_minutes * i)
+        # parsed 已排序，取前綴即可，不必每次重新篩選整份資料
+        upto = [row for ts, row in parsed if ts <= cutoff]
+        if not upto:
+            continue
+        points = compute_quadrants(
+            upto, sector_map, now=cutoff, window_minutes=window_minutes, **kwargs
+        )
+        for p in points:
+            if sectors is not None and p.sector not in sectors:
+                continue
+            trail.setdefault(p.sector, []).append(
+                {
+                    "t": cutoff.isoformat(),
+                    "strength": round(p.strength, 6),
+                    "momentum": round(p.momentum, 6),
+                    "momentum_known": p.momentum_known,
+                }
+            )
+    return trail

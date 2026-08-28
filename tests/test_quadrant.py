@@ -16,6 +16,7 @@ from twflow.quadrant import (
     QUADRANT_UNKNOWN,
     classify_quadrant,
     compute_quadrants,
+    compute_trail,
     rank_stocks,
     resolve_momentum_window,
 )
@@ -327,3 +328,85 @@ class TestClassifyQuadrantUnknown:
 
     def test_known_defaults_to_true_for_backwards_compatibility(self):
         assert classify_quadrant(0.2, 0.1) == QUADRANT_ACCEL_IN
+
+
+class TestRotationTrail:
+    """輪動軌跡：板塊在四象限圖上的移動路徑.
+
+    四象限只是某一瞬間的切片，看不出板塊是從哪裡移動過來的——但輪動的
+    重點正是移動方向。這裡驗證軌跡點確實是「當時的儀表板會顯示的位置」，
+    而不是事後回推的平滑曲線。
+    """
+
+    def _rows(self, per_minute, total=180):
+        """per_minute(t) 回傳該分鐘的 net_value."""
+        return [row(c, t, net=per_minute(t), turnover=1000)
+                for t in range(total) for c in ("A1", "A2")]
+
+    def test_returns_points_oldest_first(self):
+        m = smap({"A1": "板塊", "A2": "板塊"})
+        trail = compute_trail(self._rows(lambda t: 100), m,
+                              steps=4, step_minutes=10, min_constituents=2)
+        path = trail["板塊"]
+        assert len(path) == 4
+        times = [p["t"] for p in path]
+        assert times == sorted(times)
+
+    def test_each_point_matches_a_direct_computation_at_that_time(self):
+        """軌跡點必須等於「當時真的會顯示的位置」，不能是事後回推."""
+        m = smap({"A1": "板塊", "A2": "板塊"})
+        rows = self._rows(lambda t: 100 if t < 90 else 400)
+        trail = compute_trail(rows, m, steps=3, step_minutes=20,
+                              window_minutes=30, min_constituents=2)
+        path = trail["板塊"]
+
+        for pt in path:
+            cutoff = dt.datetime.fromisoformat(pt["t"])
+            upto = [r for r in rows
+                    if dt.datetime.fromisoformat(r["minute_ts"]) <= cutoff]
+            direct = compute_quadrants(upto, m, now=cutoff,
+                                       window_minutes=30, min_constituents=2)[0]
+            assert pt["strength"] == pytest.approx(direct.strength, abs=1e-6)
+            assert pt["momentum"] == pytest.approx(direct.momentum, abs=1e-6)
+
+    def test_trail_shows_movement_when_flow_changes(self):
+        m = smap({"A1": "板塊", "A2": "板塊"})
+        # 資金流一路增強 → 強度應該單調上升
+        rows = self._rows(lambda t: 50 + t * 5)
+        path = compute_trail(rows, m, steps=5, step_minutes=20,
+                             min_constituents=2)["板塊"]
+        strengths = [p["strength"] for p in path]
+        assert strengths == sorted(strengths)
+
+    def test_can_restrict_to_selected_sectors(self):
+        # 全部板塊都畫線會糊成一團，通常只畫前幾名
+        m = smap({"A1": "甲", "A2": "甲", "B1": "乙", "B2": "乙"})
+        rows = [row(c, t, net=100, turnover=1000)
+                for t in range(60) for c in ("A1", "A2", "B1", "B2")]
+        trail = compute_trail(rows, m, steps=3, step_minutes=10,
+                              sectors={"甲"}, min_constituents=2)
+        assert set(trail) == {"甲"}
+
+    def test_empty_input_yields_empty_trail(self):
+        assert compute_trail([], smap(), steps=4) == {}
+
+    def test_zero_steps_yields_empty_trail(self):
+        m = smap({"A1": "板塊", "A2": "板塊"})
+        assert compute_trail(self._rows(lambda t: 100), m, steps=0) == {}
+
+    def test_carries_momentum_confidence_per_point(self):
+        """開盤初期的軌跡點要標出動能不可信，不能默默畫成 0."""
+        m = smap({"A1": "板塊", "A2": "板塊"})
+        rows = self._rows(lambda t: 100, total=8)
+        path = compute_trail(rows, m, steps=4, step_minutes=2,
+                             window_minutes=30, min_constituents=2)["板塊"]
+        # 最早的點資料最少，動能必然不可信
+        assert path[0]["momentum_known"] is False
+        assert path[0]["momentum"] == 0.0
+
+    def test_step_longer_than_available_history_is_tolerated(self):
+        m = smap({"A1": "板塊", "A2": "板塊"})
+        rows = self._rows(lambda t: 100, total=20)
+        # 往回倒帶超出資料範圍的點會被略過，不該爆炸
+        trail = compute_trail(rows, m, steps=6, step_minutes=60, min_constituents=2)
+        assert all(len(p) >= 1 for p in trail.values())

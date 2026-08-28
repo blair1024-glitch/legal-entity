@@ -225,3 +225,9 @@ footer b { color: var(--fg-dim); }
   background: var(--warn-bg); border: 1px solid rgba(210,153,34,0.3);
   padding: 0.1rem 0.45rem; border-radius: 4px; white-space: nowrap;
 }
+
+.controls label.check {
+  display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer;
+  user-select: none;
+}
+.controls label.check input { accent-color: var(--slowing-out); cursor: pointer; }
