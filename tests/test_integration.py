@@ -348,6 +348,23 @@ class TestFetchErrorMessages:
         with pytest.raises(Exception, match="逾時"):
             f.get("https://example.invalid/x")
 
+    def test_ssl_error_is_not_mislabelled_as_a_network_problem(self, monkeypatch):
+        """SSLError 是 ConnectionError 的子類，順序寫反會誤報成網路不通.
+
+        實機遇到過：curl 連得上、程式卻說「DNS 或網路問題」，於是往網路
+        方向查了半天，真正的原因是 Python 憑證庫缺根憑證。這兩件事的
+        解法完全不同，訊息不能混為一談。
+        """
+        import requests
+
+        f = self._fetcher()
+        monkeypatch.setattr(
+            f.session, "request",
+            lambda *a, **k: (_ for _ in ()).throw(requests.exceptions.SSLError("bad cert")),
+        )
+        with pytest.raises(Exception, match="憑證"):
+            f.get("https://example.invalid/x")
+
     def test_connection_error_is_named(self, monkeypatch):
         import requests
 

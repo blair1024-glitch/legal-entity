@@ -256,8 +256,19 @@ class Fetcher:
             except requests.Timeout as exc:
                 last_err = FetchError(f"連線逾時（{self.timeout} 秒）")
                 last_err.__cause__ = exc
+            except requests.exceptions.SSLError as exc:
+                # 必須擋在 ConnectionError 前面——SSLError 是它的子類，
+                # 順序寫反會把憑證問題誤報成「網路不通」，而兩者的處理
+                # 方式完全不同（一個要裝憑證，一個是等網路恢復）。
+                last_err = FetchError(
+                    f"TLS 憑證驗證失敗：{exc}\n"
+                    f"    curl 能連但這裡不行，通常是 Python 的憑證庫沒有該站的根憑證。\n"
+                    f"    macOS 解法：執行 /Applications/Python\\ 3.x/Install\\ Certificates.command\n"
+                    f"    或 pip install --upgrade certifi"
+                )
+                last_err.__cause__ = exc
             except requests.ConnectionError as exc:
-                last_err = FetchError("連不上伺服器（DNS 或網路問題）")
+                last_err = FetchError(f"連不上伺服器：{exc}")
                 last_err.__cause__ = exc
             except requests.RequestException as exc:
                 last_err = exc
