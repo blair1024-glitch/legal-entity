@@ -322,3 +322,71 @@ class TestBackfill:
         assert run_eod_range(
             store, fetcher, dt.date(2026, 8, 20), dt.date(2026, 8, 17), markets=["TWSE"]
         ) == {}
+
+
+class TestFetchErrorMessages:
+    """抓取失敗時，訊息要說得出「為什麼」.
+
+    實機遇到上櫃來源在 doctor 通過、幾分鐘後卻失敗，但訊息只有
+    「抓取失敗（重試 3 次）」——分不清是自己網路斷了、對方限流、
+    還是端點改版，而這三者的處理方式完全不同。
+    """
+
+    def _fetcher(self):
+        f = Fetcher(mode="live")
+        f.max_retries = 1
+        return f
+
+    def test_timeout_is_named(self, monkeypatch):
+        import requests
+
+        f = self._fetcher()
+        monkeypatch.setattr(
+            f.session, "request",
+            lambda *a, **k: (_ for _ in ()).throw(requests.Timeout()),
+        )
+        with pytest.raises(Exception, match="逾時"):
+            f.get("https://example.invalid/x")
+
+    def test_connection_error_is_named(self, monkeypatch):
+        import requests
+
+        f = self._fetcher()
+        monkeypatch.setattr(
+            f.session, "request",
+            lambda *a, **k: (_ for _ in ()).throw(requests.ConnectionError()),
+        )
+        with pytest.raises(Exception, match="連不上伺服器"):
+            f.get("https://example.invalid/x")
+
+    @pytest.mark.parametrize("status,expected", [
+        (429, "限流"),
+        (503, "暫時無法服務"),
+    ])
+    def test_retryable_status_codes_explain_themselves(self, monkeypatch, status, expected):
+        f = self._fetcher()
+
+        class Resp:
+            status_code = status
+            url = "https://example.invalid/x"
+            text = ""
+
+        monkeypatch.setattr(f.session, "request", lambda *a, **k: Resp())
+        with pytest.raises(Exception, match=expected):
+            f.get("https://example.invalid/x")
+
+    @pytest.mark.parametrize("status,expected", [
+        (403, "被拒絕"),
+        (404, "端點不存在"),
+    ])
+    def test_non_retryable_status_codes_fail_fast_with_reason(self, monkeypatch, status, expected):
+        f = self._fetcher()
+
+        class Resp:
+            status_code = status
+            url = "https://example.invalid/x"
+            text = ""
+
+        monkeypatch.setattr(f.session, "request", lambda *a, **k: Resp())
+        with pytest.raises(Exception, match=expected):
+            f.get("https://example.invalid/x")

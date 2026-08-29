@@ -253,17 +253,38 @@ class Fetcher:
                     headers=headers,
                     timeout=self.timeout,
                 )
+            except requests.Timeout as exc:
+                last_err = FetchError(f"連線逾時（{self.timeout} 秒）")
+                last_err.__cause__ = exc
+            except requests.ConnectionError as exc:
+                last_err = FetchError("連不上伺服器（DNS 或網路問題）")
+                last_err.__cause__ = exc
             except requests.RequestException as exc:
                 last_err = exc
             else:
                 # 429/5xx 值得重試；4xx 其餘直接失敗，重試也不會變好。
                 if resp.status_code == 200:
                     return Response(url=resp.url, status=resp.status_code, text=resp.text)
-                last_err = FetchError(f"HTTP {resp.status_code} from {url}")
+                # 把狀態碼的意思講出來——429 和 503 的處理方式完全不同
+                meaning = {
+                    403: "被拒絕（可能是缺 Referer 或被封鎖）",
+                    404: "端點不存在（網址可能改版了）",
+                    429: "請求太密集被限流",
+                    500: "伺服器內部錯誤",
+                    503: "伺服器暫時無法服務（維護中或過載）",
+                }.get(resp.status_code, "")
+                last_err = FetchError(
+                    f"HTTP {resp.status_code}" + (f"（{meaning}）" if meaning else "")
+                )
                 if resp.status_code < 500 and resp.status_code != 429:
                     raise last_err
 
             if attempt < self.max_retries - 1:
                 time.sleep(2**attempt)
 
-        raise FetchError(f"抓取失敗（重試 {self.max_retries} 次）: {url}") from last_err
+        # 訊息要帶上最後一次失敗的原因。只說「重試 3 次仍失敗」會讓人分不清
+        # 是自己網路的問題、對方限流、還是端點根本不存在——三者處理方式不同。
+        raise FetchError(
+            f"{last_err}　（重試 {self.max_retries} 次後放棄）\n"
+            f"    {url}"
+        ) from last_err
