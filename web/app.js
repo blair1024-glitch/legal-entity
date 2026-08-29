@@ -63,14 +63,26 @@ function renderQuadrant(data) {
   const points = data.points || [];
 
   if (!points.length) {
+    // 空白畫面要說清楚三件事：為什麼空的、已經有什麼、下一步做什麼。
+    // 只說「尚無資料」會讓人以為是壞掉了。
+    const sub = data.has_official
+      ? `官方三大法人數據已就緒（${data.official_date}）—— 往下捲即可查看。\n`
+        + '四象限需要盤中即時資料，而它只能在盤中累積、事後無法回補。\n'
+        + '下個交易日 09:00 前執行 ./twflow auto，這張圖就會開始長出來。'
+      : '盤中執行 ./twflow auto 開始累積，或用 ./twflow demo 產生合成資料先看介面。';
+
     chart.clear();
     chart.setOption({
       title: {
-        text: '尚無盤中資金流資料',
-        subtext: '盤中執行 `twflow poll`，或用 `twflow demo` 產生合成資料試看看',
-        left: 'center', top: 'center',
-        textStyle: { color: '#6e7b8a', fontSize: 15, fontWeight: 'normal' },
-        subtextStyle: { color: '#4d5865', fontSize: 12 },
+        text: data.has_official ? '盤中資金流尚未開始累積' : '尚無資料',
+        subtext: sub,
+        // top:'center' 會讓標題與多行 subtext 疊在一起（ECharts 是以整個
+        // 標題區塊的中心對齊，不是逐行堆疊）。改用固定比例 + itemGap。
+        left: 'center',
+        top: '34%',
+        itemGap: 14,
+        textStyle: { color: '#9aa7b4', fontSize: 15, fontWeight: 600, align: 'center' },
+        subtextStyle: { color: '#6e7b8a', fontSize: 12.5, lineHeight: 23, align: 'center' },
       },
     });
     return;

@@ -105,6 +105,10 @@ def create_app(store: Store, config: Config) -> FastAPI:
             "effective_window_minutes": round(effective, 1),
             "window_shortened": effective < requested_window - 0.05,
             "momentum_unknown_sectors": unknown,
+            # 沒有盤中資料時，前端要能分辨「還沒開始收集」與「官方數據也沒有」，
+            # 兩者該講的話不一樣
+            "has_official": bool(store.latest_insti_date()),
+            "official_date": store.latest_insti_date(),
             "estimated": True,
             "disclaimer": INTRADAY_DISCLAIMER,
             "accuracy": accuracy_summary(store),
