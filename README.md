@@ -287,6 +287,18 @@ web/                儀表板前端（ECharts 已 vendor，離線可用）
 盤中原始快照不落地——量太大又沒有分析價值。只存**每分鐘彙總**
 （約 1,800 檔 × 270 分鐘 ≈ 每交易日 50 萬列），依 `retention_days` 清理。
 
+### 憑證驗證
+
+Python 3.13 起 `ssl.create_default_context()` 預設開啟 `VERIFY_X509_STRICT`，
+會嚴格要求憑證符合 RFC 5280。部分政府網站的中繼憑證缺少 Subject Key Identifier
+之類的欄位，於是 curl 和瀏覽器連得上、Python 卻報
+`certificate verify failed: Missing Subject Key Identifier`（實測櫃買中心即是）。
+
+遇到這類錯誤時，程式會對該 host 改用放寬 RFC 格式檢查的連線並留下警告。
+**放寬的只有格式檢查——憑證鏈驗證與主機名稱比對完全保留**，等同 curl 與
+瀏覽器的驗證強度。憑證過期、簽發者不明、主機名稱不符這些真正的問題
+不會被放寬，一律照常失敗。
+
 ---
 
 ## 鎖定套件版本

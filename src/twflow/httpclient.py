@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import ssl
 import threading
 import time
 import urllib.parse
@@ -25,6 +27,50 @@ from pathlib import Path
 import requests
 
 from .errors import FetchError, FixtureMissing
+
+log = logging.getLogger(__name__)
+
+# Python 3.13 起 ssl.create_default_context() 預設開啟 VERIFY_X509_STRICT，
+# 嚴格要求憑證符合 RFC 5280。有些政府網站的憑證鏈裡，中繼憑證缺少
+# Subject Key Identifier 之類的欄位，就會被擋下來——實測櫃買中心
+# (www.tpex.org.tw) 就是這種情況，錯誤訊息是：
+#
+#     certificate verify failed: Missing Subject Key Identifier
+#
+# curl 與瀏覽器不做這項額外檢查，所以它們連得上、Python 連不上。
+#
+# 這裡的處理是：預設維持嚴格；只有在真的撞到這類「規範瑕疵」錯誤時，
+# 才對該次請求改用放寬 STRICT 的連線並留下警告。
+#
+# 重要：放寬的只有 RFC 格式檢查。**憑證鏈驗證與主機名稱比對完全保留**，
+# 等同 curl 與瀏覽器的驗證強度。這不是關閉 TLS 驗證。
+_STRICTNESS_MARKERS = (
+    "Subject Key Identifier",
+    "Authority Key Identifier",
+    "invalid CA certificate",
+    "x509 strict",
+)
+
+
+def _is_strictness_failure(exc: Exception) -> bool:
+    text = str(exc)
+    return any(m.lower() in text.lower() for m in _STRICTNESS_MARKERS)
+
+
+def _relaxed_ssl_context() -> ssl.SSLContext:
+    """保留完整憑證驗證，只關掉 RFC 格式的嚴格檢查."""
+    ctx = ssl.create_default_context()
+    ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
+    # 明確保留：仍然驗證憑證鏈，仍然比對主機名稱
+    ctx.check_hostname = True
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    return ctx
+
+
+class _RelaxedStrictnessAdapter(requests.adapters.HTTPAdapter):
+    def init_poolmanager(self, *args, **kwargs):
+        kwargs["ssl_context"] = _relaxed_ssl_context()
+        return super().init_poolmanager(*args, **kwargs)
 
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -141,6 +187,8 @@ class Fetcher:
     rate_limits: dict[str, tuple[int, float]] = field(default_factory=dict)
     _limiters: dict[str, RateLimiter] = field(default_factory=dict, init=False)
     _session: requests.Session | None = field(default=None, init=False)
+    # 已知憑證有規範瑕疵、需要放寬 STRICT 的 host
+    _lenient_hosts: set[str] = field(default_factory=set, init=False)
     # 保留最近幾次的原始回應，讓 `doctor --dump` 能把伺服器實際吐回來的東西
     # 印出來。解析失敗時，這通常比錯誤訊息本身更能說明問題。
     recent: list[tuple[str, str]] = field(default_factory=list, init=False)
@@ -257,6 +305,19 @@ class Fetcher:
                 last_err = FetchError(f"連線逾時（{self.timeout} 秒）")
                 last_err.__cause__ = exc
             except requests.exceptions.SSLError as exc:
+                host = urllib.parse.urlparse(url).netloc
+                if _is_strictness_failure(exc) and host not in self._lenient_hosts:
+                    # 憑證本身沒問題，只是不合 RFC 的格式要求。記下這個 host
+                    # 並重試——下一圈迴圈會用放寬 STRICT 的連線。
+                    log.warning(
+                        "%s 的憑證鏈有規範瑕疵（%s），改用放寬 RFC 檢查的連線重試。"
+                        "憑證鏈與主機名稱仍然完整驗證。",
+                        host,
+                        str(exc).split("certificate verify failed:")[-1].strip()[:60],
+                    )
+                    self._lenient_hosts.add(host)
+                    self.session.mount(f"https://{host}/", _RelaxedStrictnessAdapter())
+                    continue
                 # 必須擋在 ConnectionError 前面——SSLError 是它的子類，
                 # 順序寫反會把憑證問題誤報成「網路不通」，而兩者的處理
                 # 方式完全不同（一個要裝憑證，一個是等網路恢復）。

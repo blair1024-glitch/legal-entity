@@ -407,3 +407,96 @@ class TestFetchErrorMessages:
         monkeypatch.setattr(f.session, "request", lambda *a, **k: Resp())
         with pytest.raises(Exception, match=expected):
             f.get("https://example.invalid/x")
+
+
+class TestStrictCertificateRelaxation:
+    """憑證鏈有 RFC 規範瑕疵時的處理.
+
+    Python 3.13 起 create_default_context() 預設開啟 VERIFY_X509_STRICT，
+    實測櫃買中心的中繼憑證缺 Subject Key Identifier 而被擋下——curl 和
+    瀏覽器都連得上，只有 Python 不行。
+
+    這裡驗證的是：只放寬 RFC 格式檢查，憑證鏈驗證與主機名稱比對必須保留。
+    """
+
+    def test_relaxed_context_still_verifies_chain_and_hostname(self):
+        import ssl
+
+        from twflow.httpclient import _relaxed_ssl_context
+
+        ctx = _relaxed_ssl_context()
+        # 放寬的只有這一項
+        assert not (ctx.verify_flags & ssl.VERIFY_X509_STRICT)
+        # 這兩項是安全底線，不能動
+        assert ctx.check_hostname is True
+        assert ctx.verify_mode == ssl.CERT_REQUIRED
+
+    @pytest.mark.parametrize("message", [
+        "certificate verify failed: Missing Subject Key Identifier",
+        "certificate verify failed: Missing Authority Key Identifier",
+        "certificate verify failed: invalid CA certificate",
+    ])
+    def test_recognises_rfc_strictness_failures(self, message):
+        from twflow.httpclient import _is_strictness_failure
+
+        assert _is_strictness_failure(Exception(message)) is True
+
+    @pytest.mark.parametrize("message", [
+        "certificate verify failed: unable to get local issuer certificate",
+        "certificate verify failed: certificate has expired",
+        "certificate verify failed: Hostname mismatch",
+    ])
+    def test_does_not_relax_for_real_certificate_problems(self, message):
+        """過期、簽發者不明、主機名稱不符——這些是真的有問題，不能放寬."""
+        from twflow.httpclient import _is_strictness_failure
+
+        assert _is_strictness_failure(Exception(message)) is False
+
+    def test_retries_once_with_a_relaxed_adapter(self, monkeypatch):
+        import requests
+
+        from twflow.httpclient import Fetcher, _RelaxedStrictnessAdapter
+
+        f = Fetcher(mode="live")
+        f.max_retries = 3
+        attempts = {"n": 0}
+
+        class Resp:
+            status_code = 200
+            url = "https://strict.example/x"
+            text = "ok"
+
+        def fake_request(*a, **k):
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                raise requests.exceptions.SSLError(
+                    "certificate verify failed: Missing Subject Key Identifier"
+                )
+            return Resp()
+
+        monkeypatch.setattr(f.session, "request", fake_request)
+        resp = f.get("https://strict.example/x")
+
+        assert resp.text == "ok"
+        assert attempts["n"] == 2
+        assert "strict.example" in f._lenient_hosts
+        adapter = f.session.get_adapter("https://strict.example/x")
+        assert isinstance(adapter, _RelaxedStrictnessAdapter)
+
+    def test_a_genuine_cert_failure_is_not_retried_leniently(self, monkeypatch):
+        import requests
+
+        from twflow.httpclient import Fetcher
+
+        f = Fetcher(mode="live")
+        f.max_retries = 1
+
+        monkeypatch.setattr(
+            f.session, "request",
+            lambda *a, **k: (_ for _ in ()).throw(
+                requests.exceptions.SSLError("certificate has expired")
+            ),
+        )
+        with pytest.raises(Exception, match="憑證"):
+            f.get("https://expired.example/x")
+        assert f._lenient_hosts == set()
