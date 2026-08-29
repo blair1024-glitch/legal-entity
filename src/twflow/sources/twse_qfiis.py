@@ -14,6 +14,7 @@ import datetime as dt
 from ..errors import ParseError, TwflowError
 from ..httpclient import Fetcher
 from .twse_common import (
+    is_common_stock,
     cell,
     extract_table,
     find_column,
@@ -43,7 +44,7 @@ def parse(text: str) -> list[dict]:
     out: list[dict] = []
     for row in rows:
         code = normalize_code(cell(row, i_code))
-        if len(code) != 4 or not code.isdigit():
+        if not is_common_stock(code):
             continue
         out.append(
             {

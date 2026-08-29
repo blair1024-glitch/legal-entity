@@ -15,6 +15,7 @@ import datetime as dt
 from ..errors import ParseError
 from ..httpclient import Fetcher
 from .twse_common import (
+    is_common_stock,
     cell,
     extract_table,
     find_column,
@@ -86,9 +87,9 @@ def parse(text: str) -> list[dict]:
     out: list[dict] = []
     for row in rows:
         code = normalize_code(cell(row, i_code))
-        # 只保留 4 碼普通股；權證、ETN、受益證券的代號長度不同，
-        # 它們沒有產業歸屬，放進板塊統計只會製造雜訊。
-        if len(code) != 4 or not code.isdigit():
+        # 只保留普通股——ETF、權證、受益證券沒有產業歸屬，
+        # 放進板塊統計只會製造雜訊（見 is_common_stock）。
+        if not is_common_stock(code):
             continue
 
         foreign = to_float(cell(row, i_foreign))

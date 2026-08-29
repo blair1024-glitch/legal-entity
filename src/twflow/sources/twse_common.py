@@ -142,6 +142,20 @@ def cell(row: list, idx: int | None, default: Any = "") -> Any:
     return row[idx]
 
 
+def is_common_stock(code: str) -> bool:
+    """判斷是否為普通股（相對於 ETF、ETN、權證、受益證券）.
+
+    台股上市櫃普通股代號一律是 4 碼數字且首碼為 1–9（台泥 1101、台積電 2330）。
+    ETF 則一律以 0 開頭：0050、0056、00878、00631L、00407A…
+
+    為什麼要排除 ETF：本工具是看「板塊資金流向」，而 ETF 沒有產業歸屬，
+    收下來只會全部堆進「未分類」。0050 這種權值 ETF 的法人買賣超動輒
+    數千萬股，足以讓「未分類」變成圖上最大的泡泡——那是個沒有意義、
+    卻又看起來很重要的板塊。
+    """
+    return len(code) == 4 and code.isdigit() and not code.startswith("0")
+
+
 def normalize_code(value: Any) -> str:
     """清理證券代號.
 

@@ -18,7 +18,7 @@ import json
 
 from ..errors import ParseError
 from ..httpclient import Fetcher
-from .twse_common import normalize_code, to_float
+from .twse_common import is_common_stock, normalize_code, to_float
 
 URL = "https://www.tpex.org.tw/openapi/v1/tpex_3insti_daily_trading"
 SOURCE = "tpex_insti"
@@ -70,7 +70,7 @@ def parse(text: str) -> list[dict]:
         if not isinstance(entry, dict):
             continue
         code = normalize_code(_pick(entry, CODE_KEYS))
-        if len(code) != 4 or not code.isdigit():
+        if not is_common_stock(code):
             continue
 
         foreign = to_float(_pick(entry, FOREIGN_KEYS))

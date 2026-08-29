@@ -13,7 +13,7 @@ import json
 
 from ..errors import ParseError
 from ..httpclient import Fetcher
-from .twse_common import normalize_code
+from .twse_common import is_common_stock, normalize_code
 
 TWSE_URL = "https://openapi.twse.com.tw/v1/opendata/t187ap03_L"
 TPEX_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O"
@@ -73,7 +73,7 @@ def parse(text: str, market: str = "TWSE") -> list[dict]:
         if not isinstance(entry, dict):
             continue
         code = normalize_code(_pick(entry, CODE_KEYS))
-        if len(code) != 4 or not code.isdigit():
+        if not is_common_stock(code):
             continue
         out.append(
             {

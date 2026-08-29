@@ -12,6 +12,7 @@ import pytest
 
 from twflow.errors import ParseError
 from twflow.sources import bsr, taifex, tpex_insti, twse_meta, twse_qfiis
+from twflow.sources.twse_t86 import parse as parse_t86
 from twflow.tradingcal import roc_to_date
 
 
@@ -176,8 +177,8 @@ class TestTwseMeta:
             {"公司代號": "0050", "產業別": ""},
             {"公司代號": "00940", "產業別": ""},
         ])
-        # 0050 是 4 碼數字，會保留；00940 是 5 碼，濾掉
-        assert [r["code"] for r in twse_meta.parse(body)] == ["2330", "0050"]
+        # ETF 一律排除——包含 0050 這種 4 碼純數字、最容易漏掉的
+        assert [r["code"] for r in twse_meta.parse(body)] == ["2330"]
 
     def test_empty_raises(self):
         with pytest.raises(ParseError, match="沒有任何公司資料"):
@@ -353,3 +354,55 @@ class TestQfiisWholeMarketGuard:
 
         assert None not in twse_qfiis.SELECT_TYPES
         assert twse_qfiis.SELECT_TYPES[0] == "ALLBUT0999"
+
+
+class TestCommonStockFilter:
+    """普通股與 ETF 的區分.
+
+    實機核對證交所 T86 網頁時發現，表格裡混著大量 ETF——而 0050、0051 這種
+    4 碼純數字的 ETF 會通過「4 碼數字」的過濾。0050 的法人買賣超動輒數千萬股，
+    收下來會全部堆進「未分類」板塊，讓它變成四象限圖上最大的泡泡。
+    """
+
+    @pytest.mark.parametrize("code", ["1101", "2330", "2303", "9958", "6488"])
+    def test_accepts_common_stocks(self, code):
+        from twflow.sources.twse_common import is_common_stock
+        assert is_common_stock(code) is True
+
+    @pytest.mark.parametrize("code", [
+        "0050",    # 元大台灣50 —— 4 碼純數字，最容易漏掉的 ETF
+        "0056",    # 元大高股息
+        "0051",
+        "00878",   # 5 碼
+        "00631L",  # 槓桿 ETF
+        "00407A",  # 主動式 ETF
+        "009816",
+        "03019B",  # 債券 ETF
+    ])
+    def test_rejects_etfs(self, code):
+        from twflow.sources.twse_common import is_common_stock
+        assert is_common_stock(code) is False
+
+    @pytest.mark.parametrize("code", ["", "2330P", "TX", "台積電"])
+    def test_rejects_malformed(self, code):
+        from twflow.sources.twse_common import is_common_stock
+        assert is_common_stock(code) is False
+
+    def test_t86_drops_etfs_from_real_world_row_mix(self):
+        """用證交所實際會回傳的混合列驗證整條解析路徑."""
+        fields = ["證券代號", "證券名稱", "外資買賣超股數",
+                  "投信買賣超股數", "自營商買賣超股數"]
+        rows = [
+            ["2303", "聯電", "88,988,696", "3,935,859", "2,724,319"],
+            ["0050", "元大台灣50", "41,108,708", "0", "-3,994,360"],
+            ["00631L", "元大台灣50正2", "1,578,514", "0", "42,036,366"],
+            ["00407A", "主動凱基台灣", "10,791,000", "0", "65,789,859"],
+            ["1303", "南亞", "15,678,983", "8,561,096", "-971,734"],
+        ]
+        out = parse_t86(json.dumps({"stat": "OK", "fields": fields, "data": rows}))
+        assert [r["code"] for r in out] == ["2303", "1303"]
+        # 順帶確認數值與證交所網頁一致
+        assert out[0]["foreign_net"] == 88_988_696
+        assert out[0]["trust_net"] == 3_935_859
+        assert out[0]["dealer_net"] == 2_724_319
+        assert out[0]["total_net"] == 95_648_874
