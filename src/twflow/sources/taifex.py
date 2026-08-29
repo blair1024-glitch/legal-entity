@@ -25,9 +25,11 @@ SOURCE = "taifex"
 
 # 預設只抓台指期與小台——這兩個最能代表法人對大盤的方向判斷。
 #
-# 期交所對「契約代號」有兩套寫法（TX / TXF），而且不同端點用的不一樣。
-# 實測用 TX 會拿到一個 HTML 錯誤頁而不是 CSV，所以每個契約都準備了
-# 候選代號，依序試到能解析為止。
+# 契約代號實測以 TXF / MXF 為準（2026-08-27 驗證通過）。保留舊寫法
+# TX / MTX 當備援，因為期交所不同端點的命名並不一致。
+#
+# 回應是 MS950（Big5）編碼，Python 認得這個名稱，requests 會依
+# Content-Type 的 charset 正確解碼，不需要額外處理。
 CONTRACT_CANDIDATES = {
     "臺股期貨": ("TXF", "TX"),
     "小型臺指期貨": ("MXF", "MTX"),
@@ -149,12 +151,13 @@ def fetch(fetcher: Fetcher, day: dt.date, contracts=DEFAULT_CONTRACTS) -> list[d
         got = False
         for code in candidates:
             try:
+                # 只送這三個參數。實測（2026-08-27）多送 firstDate/lastDate
+                # 會讓期交所改回一個 616 位元組的 HTML 錯誤頁而不是 CSV——
+                # 多給參數反而被拒絕，是這個端點最反直覺的地方。
                 resp = fetcher.get(
                     URL,
                     method="POST",
                     data={
-                        "firstDate": stamp,
-                        "lastDate": stamp,
                         "queryStartDate": stamp,
                         "queryEndDate": stamp,
                         "commodityId": code,

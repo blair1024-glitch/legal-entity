@@ -406,3 +406,72 @@ class TestCommonStockFilter:
         assert out[0]["trust_net"] == 3_935_859
         assert out[0]["dealer_net"] == 2_724_319
         assert out[0]["total_net"] == 95_648_874
+
+
+class TestTaifexRealResponse:
+    """用期交所實際回傳的內容驗證（2026-08-27 實機取得）.
+
+    這段 CSV 是照抄真實回應，不是我構造的。它同時鎖住兩件事：欄位結構，
+    以及「多方未平倉」而非「多方交易」才是我們要的欄位——後者是當日進出，
+    前者才是法人手上實際的部位。
+    """
+
+    REAL = (
+        "日期,商品名稱,身份別,多方交易口數,多方交易契約金額(千元),空方交易口數,"
+        "空方交易契約金額(千元),多空交易口數淨額,多空交易契約金額淨額(千元),"
+        "多方未平倉口數,多方未平倉契約金額(千元),空方未平倉口數,"
+        "空方未平倉契約金額(千元),多空未平倉口數淨額,多空未平倉契約金額淨額(千元)\n"
+        "2026/08/27,臺股期貨,自營商,4250,39216715,3456,31991249,794,7225465,"
+        "4142,38191027,3766,34740294,376,3450733\n"
+        "2026/08/27,臺股期貨,投信,143,1318123,1352,12450009,-1209,-11131885,"
+        "80120,738129536,3286,30273261,76834,707856275\n"
+        "2026/08/27,臺股期貨,外資及陸資,42656,393811125,43804,404278851,-1148,-10467726,"
+        "6963,64155419,91799,845760921,-84836,-781605502\n"
+    )
+
+    def test_parses_all_three_parties(self):
+        out = taifex.parse(self.REAL)
+        assert {r["party"] for r in out} == {"自營商", "投信", "外資"}
+        assert all(r["contract"] == "臺股期貨" for r in out)
+        assert all(r["trade_date"] == "2026-08-27" for r in out)
+
+    def test_reads_open_interest_not_trading_volume(self):
+        """外資當日多方交易 42,656 口，但未平倉只有 6,963 口——不能搞混."""
+        foreign = {r["party"]: r for r in taifex.parse(self.REAL)}["外資"]
+        assert foreign["long_oi"] == 6963       # 不是 42656（那是交易口數）
+        assert foreign["short_oi"] == 91799
+        assert foreign["net_oi"] == -84836      # 外資淨空 84,836 口
+
+    def test_converts_contract_value_from_thousands(self):
+        foreign = {r["party"]: r for r in taifex.parse(self.REAL)}["外資"]
+        assert foreign["net_value"] == -781_605_502 * 1000
+
+    def test_trust_is_net_long(self):
+        trust = {r["party"]: r for r in taifex.parse(self.REAL)}["投信"]
+        assert trust["net_oi"] == 76834
+
+    def test_does_not_send_the_params_that_break_the_endpoint(self):
+        """firstDate/lastDate 會讓期交所改回 HTML 錯誤頁，不能送出去.
+
+        檢查實際送出的欄位，而不是掃原始碼——原始碼裡的註解正好也提到
+        這兩個參數名，掃字串會誤判。
+        """
+        from twflow.httpclient import Response
+
+        sent = []
+        outer = self
+
+        class FakeFetcher:
+            def get(self, url, params=None, *, method="GET", data=None, **kw):
+                sent.append(data or {})
+                return Response(url=url, status=200, text=outer.REAL)
+
+        taifex.fetch(FakeFetcher(), dt.date(2026, 8, 27), contracts=("臺股期貨",))
+
+        assert sent, "應該有送出請求"
+        for payload in sent:
+            assert "firstDate" not in payload
+            assert "lastDate" not in payload
+            assert payload["queryStartDate"] == "2026/08/27"
+            assert payload["queryEndDate"] == "2026/08/27"
+            assert payload["commodityId"] == "TXF"

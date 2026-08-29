@@ -3,8 +3,6 @@
   "url": "https://www.taifex.com.tw/cht/3/futContractsDateDown",
   "params": {},
   "body": {
-    "firstDate": "2026/08/27",
-    "lastDate": "2026/08/27",
     "queryStartDate": "2026/08/27",
     "queryEndDate": "2026/08/27",
     "commodityId": "TXF"
