@@ -14,6 +14,58 @@ const QUADRANT_COLORS = {
   '動能待觀察': '#6e7b8a',
 };
 
+// ECharts 畫在 canvas 上，不吃 CSS 變數，顏色只能在 JS 這邊另外對照一份。
+// QUADRANT_COLORS（上面）跟泡泡內文字色是語意色／為了襯在鮮豔色塊上，
+// 兩個主題共用不變；這裡只放會隨主題變的「圖表外框」顏色
+// （軸線、圖例文字、tooltip、分隔線、泡泡外標籤）。
+const CHART_PALETTE = {
+  dark: {
+    titleText: '#9aa7b4', subtext: '#6e7b8a', legendText: '#9aa7b4',
+    tooltipBg: '#1c2129', tooltipBorder: '#2a313c', tooltipText: '#e6edf3',
+    axisName: '#9aa7b4', axisLabel: '#6e7b8a', axisLine: '#2a313c',
+    splitLine: 'rgba(42,49,60,0.4)', crossLine: '#3d4653',
+    labelOutside: '#c9d1d9', faint: '#6e7b8a', warn: '#d29922',
+  },
+  light: {
+    titleText: '#57606a', subtext: '#6e7781', legendText: '#57606a',
+    tooltipBg: '#ffffff', tooltipBorder: '#d0d7de', tooltipText: '#1f2328',
+    axisName: '#57606a', axisLabel: '#6e7781', axisLine: '#d0d7de',
+    splitLine: 'rgba(208,215,222,0.6)', crossLine: '#afb8c1',
+    labelOutside: '#57606a', faint: '#6e7781', warn: '#9a6700',
+  },
+};
+
+/* ---------- 主題（明暗介面） ---------- */
+
+const THEME_KEY = 'twflow_theme';
+
+// 有存過選擇就用那個；沒存過就跟系統設定；都沒有就維持深色（本工具原本
+// 唯一的樣子，沒表態的人不該無感被換成淺色）。
+function initTheme() {
+  let saved = null;
+  try {
+    saved = localStorage.getItem(THEME_KEY);
+  } catch {
+    // 無痕視窗或封鎖 storage——當作沒存過，不是錯誤
+  }
+  const theme = (saved === 'light' || saved === 'dark')
+    ? saved
+    : (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+  document.documentElement.dataset.theme = theme;
+  return theme;
+}
+
+function toggleTheme() {
+  const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+  document.documentElement.dataset.theme = next;
+  try {
+    localStorage.setItem(THEME_KEY, next);
+  } catch {
+    // 存不進去就只在這次瀏覽期間生效，不影響切換本身
+  }
+  return next;
+}
+
 /* ---------- 格式化 ---------- */
 
 // 台股習慣用「億」和「萬」，不是 M/B
@@ -45,6 +97,7 @@ function signClass(v) {
 /* ---------- 四象限圖 ---------- */
 
 function renderQuadrant(chart, data, opts = {}) {
+  const palette = CHART_PALETTE[opts.theme] || CHART_PALETTE.dark;
   const points = data.points || [];
 
   if (!points.length) {
@@ -73,8 +126,8 @@ function renderQuadrant(chart, data, opts = {}) {
         left: 'center',
         top: '34%',
         itemGap: 14,
-        textStyle: { color: '#9aa7b4', fontSize: 15, fontWeight: 600, align: 'center' },
-        subtextStyle: { color: '#6e7b8a', fontSize: 12.5, lineHeight: 23, align: 'center' },
+        textStyle: { color: palette.titleText, fontSize: 15, fontWeight: 600, align: 'center' },
+        subtextStyle: { color: palette.subtext, fontSize: 12.5, lineHeight: 23, align: 'center' },
       },
     });
     return;
@@ -98,7 +151,7 @@ function renderQuadrant(chart, data, opts = {}) {
   const trailSeries = Object.entries(trails)
     .filter(([, path]) => path.length > 1)
     .map(([sector, path]) => {
-      const color = QUADRANT_COLORS[quadrantOf[sector]] || '#6e7b8a';
+      const color = QUADRANT_COLORS[quadrantOf[sector]] || palette.faint;
       return {
         name: `軌跡-${sector}`,
         type: 'line',
@@ -131,8 +184,9 @@ function renderQuadrant(chart, data, opts = {}) {
         value: [p.strength, p.momentum],
         raw: p,
         label: fitsInside
+          // 泡泡內文字要襯在鮮豔色塊上，兩個主題都用深色，不用 palette
           ? { position: 'inside', color: '#0d1117', fontSize: 9, fontWeight: 600 }
-          : { position: 'right', distance: 5, color: '#c9d1d9', fontSize: 10, fontWeight: 400 },
+          : { position: 'right', distance: 5, color: palette.labelOutside, fontSize: 10, fontWeight: 400 },
       };
     }),
     // symbolSize 的第一個參數是 value 陣列本身，data item 要從 params 取
@@ -153,15 +207,15 @@ function renderQuadrant(chart, data, opts = {}) {
     legend: {
       // 只列四象限＋待觀察，軌跡線不進圖例（會塞爆）
       data: Object.keys(QUADRANT_COLORS),
-      textStyle: { color: '#9aa7b4', fontSize: 11 },
+      textStyle: { color: palette.legendText, fontSize: 11 },
       top: 0, itemWidth: 10, itemHeight: 10,
     },
     grid: { left: 70, right: 90, top: 40, bottom: 55 },
     tooltip: {
       trigger: 'item',
-      backgroundColor: '#1c2129',
-      borderColor: '#2a313c',
-      textStyle: { color: '#e6edf3', fontSize: 12 },
+      backgroundColor: palette.tooltipBg,
+      borderColor: palette.tooltipBorder,
+      textStyle: { color: palette.tooltipText, fontSize: 12 },
       formatter: p => {
         const d = p.data.raw;
         const src = d.custom ? '自訂細分板塊' : '官方產業別';
@@ -169,42 +223,42 @@ function renderQuadrant(chart, data, opts = {}) {
         // 但實情是「還算不出來」——兩者意思差很多。
         const momentum = d.momentum_known
           ? `${d.momentum >= 0 ? '+' : ''}${(d.momentum * 100).toFixed(2)}%`
-          + ` <span style="color:#6e7b8a">(${d.momentum_window_minutes}分)</span>`
-          : '<span style="color:#6e7b8a">歷史不足，尚無法判定</span>';
-        return `<b>${d.sector}</b> <span style="color:#6e7b8a">(${src})</span><br>
+          + ` <span style="color:${palette.faint}">(${d.momentum_window_minutes}分)</span>`
+          : `<span style="color:${palette.faint}">歷史不足，尚無法判定</span>`;
+        return `<b>${d.sector}</b> <span style="color:${palette.faint}">(${src})</span><br>
           <span style="color:${QUADRANT_COLORS[d.quadrant]}">${d.quadrant}</span><br>
           強度　${d.strength >= 0 ? '+' : ''}${(d.strength * 100).toFixed(2)}%<br>
           動能　${momentum}<br>
           淨流　${money(d.net_value)}<br>
           成交值 ${money(d.turnover_value)}<br>
           成分股 ${d.constituents} 檔
-          <div style="margin-top:4px;color:#d29922;font-size:11px">推估值</div>`;
+          <div style="margin-top:4px;color:${palette.warn};font-size:11px">推估值</div>`;
       },
     },
     xAxis: {
       name: '← 資金流出　　強度　　資金流入 →',
       nameLocation: 'middle', nameGap: 32,
-      nameTextStyle: { color: '#9aa7b4', fontSize: 11 },
+      nameTextStyle: { color: palette.axisName, fontSize: 11 },
       min: -maxX, max: maxX,
-      axisLine: { lineStyle: { color: '#2a313c' } },
-      axisLabel: { color: '#6e7b8a', fontSize: 10, formatter: v => `${(v * 100).toFixed(0)}%` },
-      splitLine: { lineStyle: { color: 'rgba(42,49,60,0.4)' } },
+      axisLine: { lineStyle: { color: palette.axisLine } },
+      axisLabel: { color: palette.axisLabel, fontSize: 10, formatter: v => `${(v * 100).toFixed(0)}%` },
+      splitLine: { lineStyle: { color: palette.splitLine } },
     },
     yAxis: {
       name: '← 放緩　　動能　　加速 →',
       nameLocation: 'middle', nameGap: 50, nameRotate: 90,
-      nameTextStyle: { color: '#9aa7b4', fontSize: 11 },
+      nameTextStyle: { color: palette.axisName, fontSize: 11 },
       min: -maxY, max: maxY,
-      axisLine: { lineStyle: { color: '#2a313c' } },
-      axisLabel: { color: '#6e7b8a', fontSize: 10, formatter: v => `${(v * 100).toFixed(1)}%` },
-      splitLine: { lineStyle: { color: 'rgba(42,49,60,0.4)' } },
+      axisLine: { lineStyle: { color: palette.axisLine } },
+      axisLabel: { color: palette.axisLabel, fontSize: 10, formatter: v => `${(v * 100).toFixed(1)}%` },
+      splitLine: { lineStyle: { color: palette.splitLine } },
     },
     series: [
       // 象限分隔的十字線
       {
         type: 'line', markLine: {
           silent: true, symbol: 'none',
-          lineStyle: { color: '#3d4653', width: 1, type: 'solid' },
+          lineStyle: { color: palette.crossLine, width: 1, type: 'solid' },
           label: { show: false },
           data: [{ xAxis: 0 }, { yAxis: 0 }],
         },

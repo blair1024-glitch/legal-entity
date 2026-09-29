@@ -1,6 +1,12 @@
 /* 台股法人資金流向儀表板 —— 深色為主，長時間盯盤比較不累。 */
 
 :root {
+  /* 告訴瀏覽器「這個頁面自己有處理深色/淺色，不用你幫忙」——沒有這行，
+     部分瀏覽器／作業系統組合會在系統是深色模式時，對「看起來是淺色」的
+     頁面自動套用反色/強制變暗的啟發式處理，跟這裡自己控制的明暗切換
+     互相打架，結果是 computed style 說是淺色、畫面卻是深色。 */
+  color-scheme: dark;
+
   --bg: #0d1117;
   --panel: #161b22;
   --panel-2: #1c2129;
@@ -22,6 +28,44 @@
 
   --warn: #d29922;
   --warn-bg: rgba(210, 153, 34, 0.12);
+
+  /* 純 RGB 三元組（無 alpha），給需要自訂透明度的地方用
+     rgba(var(--x-rgb), N) 組——CSS 變數存的是 hex 沒辦法這樣組合。 */
+  --warn-rgb: 210, 153, 34;
+  --slowing-out-rgb: 88, 166, 255;
+  --border-rgb: 42, 49, 60;
+}
+
+/* 淺色主題：只覆寫變數，其餘規則全部透過 var(--xxx) 引用，靠 cascade
+   自動套用，不需要另外寫一份規則。ECharts 是畫在 canvas 上，不吃 CSS
+   變數，顏色對照表另外放在 shared/render.js 的 CHART_PALETTE。 */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #f6f8fa;
+  --panel: #ffffff;
+  --panel-2: #f0f2f5;
+  --border: #d0d7de;
+  --fg: #1f2328;
+  --fg-dim: #57606a;
+  --fg-faint: #6e7781;
+
+  --up: #cf222e;
+  --up-soft: rgba(207, 34, 46, 0.12);
+  --down: #1a7f37;
+  --down-soft: rgba(26, 127, 55, 0.12);
+
+  --accel-in: #cf222e;
+  --slowing-in: #9a6700;
+  --accel-out: #1a7f37;
+  --slowing-out: #0969da;
+
+  --warn: #9a6700;
+  --warn-bg: rgba(154, 103, 0, 0.12);
+
+  --warn-rgb: 154, 103, 0;
+  --slowing-out-rgb: 9, 105, 218;
+  --border-rgb: 208, 215, 222;
 }
 
 * { box-sizing: border-box; }
@@ -58,6 +102,18 @@ body {
 .pill.open { background: var(--up-soft); border-color: var(--up); color: var(--up); }
 .pill.closed { background: var(--panel-2); }
 .meta { color: var(--fg-faint); font-size: 0.78rem; }
+
+.theme-toggle {
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--fg-dim);
+  border-radius: 999px; width: 1.9rem; height: 1.9rem; font-size: 0.95rem;
+  cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+  line-height: 1; padding: 0;
+}
+.theme-toggle:hover { border-color: var(--fg-faint); }
+
+/* 給那幾處原本用 style="color:#6e7b8a" 內嵌寫死色碼的地方換上——這樣
+   明暗切換時才會跟著變，不會停在深色主題的顏色不動。 */
+.faint { color: var(--fg-faint); }
 
 /* ---------- 免責橫幅 ---------- */
 
@@ -141,9 +197,9 @@ main { padding: 1.25rem; display: flex; flex-direction: column; gap: 1.25rem; }
   font-size: 0.7rem; padding: 0.1rem 0.45rem; border-radius: 4px;
   background: var(--panel-2); color: var(--fg-faint); border: 1px solid var(--border);
 }
-.tag.est { color: var(--warn); border-color: rgba(210,153,34,0.4); background: var(--warn-bg); }
-.tag.official { color: var(--slowing-out); border-color: rgba(88,166,255,0.35);
-                background: rgba(88,166,255,0.1); }
+.tag.est { color: var(--warn); border-color: rgba(var(--warn-rgb),0.4); background: var(--warn-bg); }
+.tag.official { color: var(--slowing-out); border-color: rgba(var(--slowing-out-rgb),0.35);
+                background: rgba(var(--slowing-out-rgb),0.1); }
 
 .controls { margin-left: auto; display: flex; align-items: center; gap: 1rem; }
 .controls label { color: var(--fg-faint); font-size: 0.8rem; }
@@ -167,7 +223,7 @@ select {
   padding: 0.35rem 0.5rem; border-radius: 5px;
   position: relative; font-size: 0.84rem;
 }
-.rank-row:nth-child(odd) { background: rgba(255,255,255,0.02); }
+.rank-row:nth-child(odd) { background: rgba(127,127,127,0.07); }
 .rank-row .idx { color: var(--fg-faint); font-size: 0.75rem; text-align: right; }
 .rank-row .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rank-row .label small { color: var(--fg-faint); margin-left: 0.35rem; }
@@ -200,12 +256,33 @@ select {
 }
 .data-table th.est-col .hint { color: var(--warn); }
 .data-table th.official-col .hint { color: var(--slowing-out); }
-.data-table td { border-bottom: 1px solid rgba(42,49,60,0.5); font-variant-numeric: tabular-nums; }
-.data-table tbody tr:hover { background: rgba(255,255,255,0.03); }
+.data-table td { border-bottom: 1px solid rgba(var(--border-rgb),0.5); font-variant-numeric: tabular-nums; }
+.data-table tbody tr:hover { background: rgba(127,127,127,0.09); }
 .num { text-align: right !important; }
 td.pos { color: var(--up); }
 td.neg { color: var(--down); }
 td.muted { color: var(--fg-faint); }
+
+/* ---------- 自選股自助新增（GitHub Pages 版專用） ---------- */
+
+.watchlist-add { display: flex; align-items: center; gap: 0.4rem; margin-left: auto; }
+.watchlist-add input {
+  background: var(--panel-2); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 5px;
+  padding: 0.25rem 0.5rem; font: inherit; font-size: 0.8rem; width: 8rem;
+}
+.watchlist-add button {
+  background: var(--panel-2); color: var(--fg-dim);
+  border: 1px solid var(--border); border-radius: 5px;
+  padding: 0.25rem 0.7rem; font: inherit; font-size: 0.8rem; cursor: pointer;
+}
+.watchlist-add button:hover { border-color: var(--fg-faint); color: var(--fg); }
+
+.remove-row {
+  background: none; border: none; color: var(--fg-faint);
+  cursor: pointer; font-size: 1rem; line-height: 1; padding: 0 0.3rem;
+}
+.remove-row:hover { color: var(--up); }
 
 /* ---------- 面板 ---------- */
 
@@ -214,7 +291,7 @@ td.muted { color: var(--fg-faint); }
   display: flex; justify-content: space-between; gap: 1rem;
   padding: 0.35rem 0.5rem; border-radius: 5px;
 }
-.panel-row:nth-child(odd) { background: rgba(255,255,255,0.02); }
+.panel-row:nth-child(odd) { background: rgba(127,127,127,0.07); }
 .panel-row .k { color: var(--fg-dim); }
 .panel-row .v { font-variant-numeric: tabular-nums; font-weight: 600; }
 .empty { color: var(--fg-faint); font-size: 0.82rem; padding: 0.5rem; font-style: italic; }
@@ -236,7 +313,7 @@ footer b { color: var(--fg-dim); }
 .q-unknown { color: var(--fg-faint); }
 .window-note {
   font-size: 0.75rem; color: var(--warn);
-  background: var(--warn-bg); border: 1px solid rgba(210,153,34,0.3);
+  background: var(--warn-bg); border: 1px solid rgba(var(--warn-rgb),0.3);
   padding: 0.1rem 0.45rem; border-radius: 4px; white-space: nowrap;
 }
 
@@ -248,4 +325,4 @@ footer b { color: var(--fg-dim); }
 
 .clear-filter { margin-left: auto; font-size: 0.78rem; }
 .rank-row.clickable { cursor: pointer; }
-.rank-row.clickable:hover { background: rgba(255,255,255,0.06); }
+.rank-row.clickable:hover { background: rgba(127,127,127,0.14); }

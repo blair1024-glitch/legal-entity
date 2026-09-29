@@ -237,6 +237,38 @@ def institutional_view(store: Store, config: Config, *, date: str | None = None,
     }
 
 
+def watchlist_lookup_view(store: Store, config: Config) -> dict:
+    """全市場的官方數字＋外資持股比率，以代號查詢（不分頁、不排序）.
+
+    ``institutional_view()`` 只回傳買超／賣超前後 N 檔，給榜單用；這裡是
+    給 GitHub Pages 版「使用者自己輸入代號加自選股」用的——使用者可能
+    輸入任何一檔，不能假設它落在買賣超排行的前後幾十名之內。
+    """
+    smap = sector_map(store, config)
+    names = store.security_names()
+    ratios = store.latest_foreign_holding()
+
+    trade_date = store.latest_insti_date()
+    insti = {r["code"]: r for r in store.insti_daily(trade_date)} if trade_date else {}
+
+    out: dict[str, dict] = {}
+    for code in set(insti) | set(ratios):
+        official = insti.get(code)
+        out[code] = {
+            "name": names.get(code, ""),
+            "sector": smap.sector_of(code),
+            "foreign_ratio": ratios.get(code),
+            "official": {
+                "trade_date": trade_date,
+                "foreign_net": official["foreign_net"] if official else None,
+                "trust_net": official["trust_net"] if official else None,
+                "dealer_net": official["dealer_net"] if official else None,
+                "total_net": official["total_net"] if official else None,
+            },
+        }
+    return out
+
+
 def futures_view(store: Store, *, date: str | None = None) -> dict:
     """期貨三大法人未平倉——法人多空方向最直接的官方數字."""
     trade_date = date or store.latest_futures_date()

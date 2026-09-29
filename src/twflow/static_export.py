@@ -4,9 +4,14 @@ GitHub Actions 每次執行都是全新環境、沒有辦法像 ``api.py`` 那�
 帶參數的請求。這裡改成**收盤前預先算好幾種固定情境**，寫成檔案，前端
 改成讀檔案而不是打 API。
 
+``watchlist_lookup`` 這份比較特別：不是給某個畫面直接顯示，是給前端
+「使用者自己輸入代號加自選股」這個功能查詢用的全市場對照表（見
+``views.watchlist_lookup_view``）——使用者可能輸入任何一檔，不能只靠
+``institutional`` 那份買賣超前後幾十檔的榜單。
+
 ## 為什麼要「全部算完才寫檔」
 
-``build_export()`` 把 9 份輸出的內容都在記憶體算好才回傳；``write_export()``
+``build_export()`` 把 11 份輸出的內容都在記憶體算好才回傳；``write_export()``
 是後面單獨的步驟，只做檔案 I/O。任何一步計算失敗就整個 raise、一個檔案
 都不寫——呼叫端（GitHub Actions workflow）只要讓 ``export-static`` 指令
 失敗時不要進到 commit 步驟，GitHub Pages 上的畫面就會維持上一次成功的
@@ -59,7 +64,7 @@ def _pipeline_meta(store: Store) -> dict:
 
 
 def build_export(store: Store, config: Config, *, date: str | None = None) -> dict[str, dict]:
-    """算好全部 9 份輸出，回傳 ``{檔名(不含副檔名): payload}``.
+    """算好全部 11 份輸出，回傳 ``{檔名(不含副檔名): payload}``.
 
     任一步失敗就整個 raise，呼叫端不該收到部分結果。
     """
@@ -73,6 +78,7 @@ def build_export(store: Store, config: Config, *, date: str | None = None) -> di
 
     outputs["stocks_full"] = views.stocks_view(store, config, date=date, limit=0)
     outputs["watchlist"] = views.watchlist_view(store, config, date=date)
+    outputs["watchlist_lookup"] = views.watchlist_lookup_view(store, config)
     outputs["institutional"] = views.institutional_view(store, config, date=date)
     outputs["futures"] = views.futures_view(store, date=date)
     outputs["brokers"] = views.brokers_view(store, config, date=date)

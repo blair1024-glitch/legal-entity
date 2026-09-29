@@ -76,6 +76,33 @@ class TestWatchlistView:
         assert "official" in row
 
 
+class TestWatchlistLookupView:
+    def test_empty_store_yields_empty_dict_not_error(self, store, config):
+        assert views.watchlist_lookup_view(store, config) == {}
+
+    def test_covers_any_code_with_official_or_ratio_data(self, store, config, fetcher):
+        sync_securities(store, fetcher, ["TWSE"])
+        run_eod(store, fetcher, DAY, markets=["TWSE"])
+        out = views.watchlist_lookup_view(store, config)
+        assert out
+        code, entry = next(iter(out.items()))
+        assert "name" in entry
+        assert "sector" in entry
+        assert "foreign_ratio" in entry
+        assert set(entry["official"]) == {"trade_date", "foreign_net", "trust_net", "dealer_net", "total_net"}
+
+    def test_shape_matches_watchlist_view_official_block(self, store, config, fetcher):
+        # 這份是給自助新增自選股查任意代號用的，形狀要跟預設清單的
+        # watchlist_view() 一致，前端才能共用同一個渲染邏輯。
+        sync_securities(store, fetcher, ["TWSE"])
+        run_eod(store, fetcher, DAY, markets=["TWSE"])
+        lookup = views.watchlist_lookup_view(store, config)
+        watchlist = views.watchlist_view(store, config, date=DAY.isoformat())
+        configured_code = watchlist["items"][0]["code"]
+        assert configured_code in lookup
+        assert set(lookup[configured_code]["official"]) == set(watchlist["items"][0]["official"])
+
+
 class TestInstitutionalView:
     def test_no_data_yields_empty_not_error(self, store, config):
         out = views.institutional_view(store, config)

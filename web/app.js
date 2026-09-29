@@ -20,6 +20,28 @@ async function getJSON(url) {
   return res.json();
 }
 
+/* ---------- 主題 ---------- */
+
+let currentTheme = initTheme();
+// 快取上一次成功拿到的四象限資料，主題切換時直接用它重畫，
+// 不必為了換個顏色重新打一次 API。
+let lastQuadrantData = null;
+
+function updateThemeButton() {
+  const btn = document.getElementById('theme-toggle');
+  // 按鈕顯示的是「點下去會變成」的圖示，不是目前的狀態。
+  btn.textContent = currentTheme === 'light' ? '🌙' : '☀️';
+}
+
+document.getElementById('theme-toggle').addEventListener('click', () => {
+  currentTheme = toggleTheme();
+  updateThemeButton();
+  // lastQuadrantData 是即時 API 回的資料，trail 欄位早就依當下的勾選
+  // 狀態抓好了（勾/不勾本身就會觸發重新 loadQuadrant），這裡直接重畫即可。
+  if (lastQuadrantData) renderQuadrant(chart, lastQuadrantData, { theme: currentTheme });
+});
+updateThemeButton();
+
 /* ---------- 四象限圖 ---------- */
 
 const chart = echarts.init(document.getElementById('quadrant-chart'), null, {
@@ -33,10 +55,11 @@ async function loadQuadrant() {
   const showTrail = document.getElementById('trail-toggle').checked;
   const trail = showTrail ? '&trail=6&trail_step=20&trail_top=6' : '';
   const data = await getJSON(`/api/quadrant?window=${win}${trail}`);
+  lastQuadrantData = data;
 
   document.getElementById('trail-foot').hidden = !showTrail;
 
-  renderQuadrant(chart, data);
+  renderQuadrant(chart, data, { theme: currentTheme });
   document.getElementById('disclaimer-text').textContent = data.disclaimer || '';
 
   // 開盤初期視窗會自動縮短，要讓使用者知道現在看的是幾分鐘的動能
@@ -71,12 +94,12 @@ async function loadQuadrant() {
     const l = acc.latest;
     badge.innerHTML = `推估準確度　等級相關 <b>${l.spearman >= 0 ? '+' : ''}${l.spearman.toFixed(2)}</b>
       · 方向一致 <b>${(l.sign_match * 100).toFixed(0)}%</b>
-      <span style="color:#6e7b8a">（${l.trade_date}，${l.n_stocks} 檔）</span>`;
+      <span class="faint">（${l.trade_date}，${l.n_stocks} 檔）</span>`;
     badge.title = `近 ${acc.days} 日平均等級相關 ${acc.mean_spearman.toFixed(2)}。`
       + '這是把盤中推估值與收盤後官方三大法人買賣超比對得出的：'
       + '1.0 代表排序完全一致，0 代表毫無關聯。';
   } else {
-    badge.innerHTML = '<span style="color:#6e7b8a">推估準確度：尚無資料'
+    badge.innerHTML = '<span class="faint">推估準確度：尚無資料'
       + '（需要盤中推估與盤後官方數據各一天才能比對）</span>';
   }
 }

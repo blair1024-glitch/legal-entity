@@ -17,6 +17,7 @@
   <div class="status" id="status">
     <span class="pill" id="session-pill">載入中…</span>
     <span class="meta" id="meta-line"></span>
+    <button class="theme-toggle" id="theme-toggle" title="切換明暗主題" aria-label="切換明暗主題">🌙</button>
   </div>
 </header>
 
@@ -173,7 +174,16 @@
     <div class="card-head">
       <h2>自選股</h2>
       <span class="tag">盤中推估與盤後官方數字並列</span>
+      <form class="watchlist-add" id="watchlist-add-form">
+        <input type="text" id="watchlist-add-input" placeholder="代號，例如 2603" inputmode="numeric" maxlength="6">
+        <button type="submit">加入</button>
+      </form>
     </div>
+    <p class="note warn" id="watchlist-add-msg" hidden></p>
+    <p class="note">
+      這裡的預設清單來自 repo 設定；自己用上面輸入框加的股票存在
+      <b>這個瀏覽器</b>裡，換裝置或清瀏覽器資料要重新加一次。
+    </p>
     <div class="table-wrap">
       <table class="data-table" id="watchlist-table">
         <thead>
@@ -185,6 +195,7 @@
             <th class="num official-col">外資買賣超<span class="hint">官方</span></th>
             <th class="num official-col">投信買賣超<span class="hint">官方</span></th>
             <th class="num official-col">三大法人合計<span class="hint">官方</span></th>
+            <th></th>
           </tr>
         </thead>
         <tbody></tbody>

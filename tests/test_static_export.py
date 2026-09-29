@@ -2,7 +2,7 @@ from pathlib import Path
 """static_export.py 的測試.
 
 build_export() 是給 GitHub Actions 用的核心：Actions 每次執行都是全新
-環境，沒辦法像 api.py 那樣即時回應。這裡驗證匯出的 9 份 JSON 形狀正確，
+環境，沒辦法像 api.py 那樣即時回應。這裡驗證匯出的 11 份 JSON 形狀正確，
 以及「全部算完才回傳、任一步失敗就整個 raise」這個承諾真的成立——
 因為 workflow 的容錯完全依賴這個承諾：export-static 失敗就不寫檔、
 不進 commit，Pages 才不會被半成品覆蓋。
@@ -40,13 +40,24 @@ def config():
 
 
 class TestBuildExport:
-    def test_produces_all_nine_files(self, store, config):
+    def test_produces_all_eleven_files(self, store, config):
         outputs = build_export(store, config)
         expected = {f"quadrant_{w}" for w in QUADRANT_WINDOWS} | {
-            "stocks_full", "watchlist", "institutional",
+            "stocks_full", "watchlist", "watchlist_lookup", "institutional",
             "futures", "brokers", "accuracy", "meta",
         }
         assert set(outputs) == expected
+
+    def test_watchlist_lookup_covers_codes_beyond_the_configured_list(self, store, config, fetcher):
+        # watchlist.json 只有 config 設定的少數幾檔；watchlist_lookup.json
+        # 是給前端「使用者自己輸入任意代號」查的，範圍要更廣，不能只是
+        # watchlist.json 的另一種格式。
+        sync_securities(store, fetcher, ["TWSE"])
+        run_eod(store, fetcher, DAY, markets=["TWSE"])
+        out = build_export(store, config, date=DAY.isoformat())
+        configured_codes = {it["code"] for it in out["watchlist"]["items"]}
+        lookup_codes = set(out["watchlist_lookup"])
+        assert len(lookup_codes) > len(configured_codes)
 
     def test_each_quadrant_file_uses_its_own_window(self, store, config):
         outputs = build_export(store, config)

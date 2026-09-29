@@ -14,6 +14,47 @@ const REFRESH_MS = 5 * 60 * 1000; // 資料本身更新頻率遠低於本機版�
 // 目前鑽取的板塊（null = 看全市場個股）。點板塊泡泡或板塊排行列即可切換。
 let selectedSector = null;
 
+/* ---------- 主題 ---------- */
+
+let currentTheme = initTheme();
+let lastQuadrantData = null; // 主題切換時用來重畫，不必為了換顏色重新 fetch
+
+function updateThemeButton() {
+  const btn = document.getElementById('theme-toggle');
+  btn.textContent = currentTheme === 'light' ? '🌙' : '☀️';
+}
+
+document.getElementById('theme-toggle').addEventListener('click', () => {
+  currentTheme = toggleTheme();
+  updateThemeButton();
+  if (lastQuadrantData) renderQuadrant(chart, lastQuadrantData, quadrantRenderOpts());
+});
+updateThemeButton();
+
+/* ---------- 自訂自選股（存在瀏覽器 localStorage，只有這個版本有） ---------- */
+
+const CUSTOM_WATCHLIST_KEY = 'twflow_custom_watchlist';
+
+function loadCustomWatchlist() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(CUSTOM_WATCHLIST_KEY));
+    return Array.isArray(raw) ? raw.filter(c => typeof c === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveCustomWatchlist(codes) {
+  try {
+    localStorage.setItem(CUSTOM_WATCHLIST_KEY, JSON.stringify(codes));
+  } catch {
+    // 存不進去（無痕視窗、被封鎖）就只在這次瀏覽期間生效
+  }
+}
+
+let customWatchlist = loadCustomWatchlist();
+let defaultWatchlistItems = []; // loadWatchlist() 每次重新整理時填入
+
 async function getJSON(path) {
   const res = await fetch(`${path}?_=${Date.now()}`);
   if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`);
@@ -48,6 +89,22 @@ const chart = echarts.init(document.getElementById('quadrant-chart'), null, {
 
 /* ---------- 各區塊 ---------- */
 
+// 空畫面的「下一步」在這個版本是排程自動處理，不是要使用者手動下指令
+// ——render.js 的預設文字是寫給本機版的，這裡蓋掉。主題切換重畫時也要
+// 用同一份 opts，不然重畫會掉回 render.js 的預設（本機版）文字。
+function quadrantRenderOpts() {
+  return {
+    theme: currentTheme,
+    emptyMessage: d => d.has_official
+      ? `官方三大法人數據已就緒（${d.official_date}）—— 往下捲即可查看。\n`
+        + '四象限需要盤中即時資料，而它只能在盤中累積、事後無法回補。\n'
+        + 'GitHub Actions 會在下個交易日盤中自動輪詢累積，不需要手動操作，\n'
+        + '過幾輪排程後這張圖就會開始長出來。'
+      : '尚無任何資料。GitHub Actions 可能還沒執行過第一輪，\n'
+        + '可以到 repo 的 Actions 分頁手動觸發一次「twflow · 盤後」試試看。',
+  };
+}
+
 async function loadQuadrant() {
   const win = document.getElementById('window-select').value;
   const showTrail = document.getElementById('trail-toggle').checked;
@@ -57,17 +114,8 @@ async function loadQuadrant() {
 
   // 靜態匯出一律把輪動軌跡算好放進檔案（不像 API 可以用查詢參數決定
   // 要不要算），勾選與否只是要不要把它畫出來。
-  renderQuadrant(chart, showTrail ? data : { ...data, trail: {} }, {
-    // 空畫面的「下一步」在這個版本是排程自動處理，不是要使用者手動下指令
-    // ——render.js 的預設文字是寫給本機版的，這裡蓋掉。
-    emptyMessage: d => d.has_official
-      ? `官方三大法人數據已就緒（${d.official_date}）—— 往下捲即可查看。\n`
-        + '四象限需要盤中即時資料，而它只能在盤中累積、事後無法回補。\n'
-        + 'GitHub Actions 會在下個交易日盤中自動輪詢累積，不需要手動操作，\n'
-        + '過幾輪排程後這張圖就會開始長出來。'
-      : '尚無任何資料。GitHub Actions 可能還沒執行過第一輪，\n'
-        + '可以到 repo 的 Actions 分頁手動觸發一次「twflow · 盤後」試試看。',
-  });
+  lastQuadrantData = showTrail ? data : { ...data, trail: {} };
+  renderQuadrant(chart, lastQuadrantData, quadrantRenderOpts());
   document.getElementById('disclaimer-text').textContent = data.disclaimer || '';
 
   // 開盤初期視窗會自動縮短，要讓使用者知道現在看的是幾分鐘的動能
@@ -102,12 +150,12 @@ async function loadQuadrant() {
     const l = acc.latest;
     badge.innerHTML = `推估準確度　等級相關 <b>${l.spearman >= 0 ? '+' : ''}${l.spearman.toFixed(2)}</b>
       · 方向一致 <b>${(l.sign_match * 100).toFixed(0)}%</b>
-      <span style="color:#6e7b8a">（${l.trade_date}，${l.n_stocks} 檔）</span>`;
+      <span class="faint">（${l.trade_date}，${l.n_stocks} 檔）</span>`;
     badge.title = `近 ${acc.days} 日平均等級相關 ${acc.mean_spearman.toFixed(2)}。`
       + '這是把盤中推估值與收盤後官方三大法人買賣超比對得出的：'
       + '1.0 代表排序完全一致，0 代表毫無關聯。';
   } else {
-    badge.innerHTML = '<span style="color:#6e7b8a">推估準確度：尚無資料'
+    badge.innerHTML = '<span class="faint">推估準確度：尚無資料'
       + '（需要盤中推估與盤後官方數據各一天才能比對）</span>';
   }
 }
@@ -140,29 +188,128 @@ function selectSector(sector) {
   loadStocks().catch(err => console.warn('載入成分股失敗:', err));
 }
 
-async function loadWatchlist() {
-  const data = await getJSON('data/watchlist.json');
+function watchlistRowHtml(it, { removable = false } = {}) {
+  const o = it.official || {};
+  const removeCell = removable
+    ? `<td><button class="remove-row" data-remove="${it.code}" title="移除">×</button></td>`
+    : '<td></td>';
+  return `<tr>
+    <td>${it.code}</td>
+    <td>${it.name || '—'}</td>
+    <td class="muted">${it.sector}</td>
+    <td class="num">${it.last_price ? it.last_price.toFixed(2) : '—'}</td>
+    <td class="num ${signClass(it.est_net_value)}">${money(it.est_net_value)}</td>
+    <td class="num">${pct(it.foreign_ratio, 2)}</td>
+    <td class="num ${signClass(o.foreign_net)}">${lots(o.foreign_net)}</td>
+    <td class="num ${signClass(o.trust_net)}">${lots(o.trust_net)}</td>
+    <td class="num ${signClass(o.total_net)}">${lots(o.total_net)}</td>
+    ${removeCell}
+  </tr>`;
+}
+
+// 自訂清單存的是代號；實際資料每次都重新查（推估淨流來自 stocks_full.json，
+// 官方數字來自 watchlist_lookup.json）。兩份都是全市場規模，一次載入後
+// 給這一輪要查的所有代號共用，不要每個代號各自重新 fetch 一次。
+async function fetchLookupSources() {
+  const [stocksFull, lookup] = await Promise.all([
+    getJSON('data/stocks_full.json'),
+    getJSON('data/watchlist_lookup.json'),
+  ]);
+  return { stocks: stocksFull.stocks || [], lookup };
+}
+
+// 查不到的話回傳 null，呼叫端決定怎麼顯示。
+function resolveFromSources(code, { stocks, lookup }) {
+  const stock = stocks.find(s => s.code === code);
+  const meta = lookup[code];
+  if (!stock && !meta) return null;
+  return {
+    code,
+    name: (stock && stock.name) || (meta && meta.name) || '',
+    sector: (stock && stock.sector) || (meta && meta.sector) || '—',
+    last_price: stock ? stock.last_price : 0,
+    est_net_value: stock ? stock.net_value : 0,
+    foreign_ratio: meta ? meta.foreign_ratio : null,
+    official: meta ? meta.official : {},
+  };
+}
+
+function renderWatchlistTable(customItems) {
   const tbody = document.querySelector('#watchlist-table tbody');
-  if (!data.items.length) {
-    tbody.innerHTML = '<tr><td colspan="9" class="muted">自選股清單是空的，'
-      + '請編輯 ci/config.ci.yaml 的 watchlist。</td></tr>';
+  const rows = [
+    ...defaultWatchlistItems.map(it => watchlistRowHtml(it)),
+    ...customItems.map(it => watchlistRowHtml(it, { removable: true })),
+  ];
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="10" class="muted">自選股清單是空的，'
+      + '用上面的輸入框加幾檔看看。</td></tr>';
     return;
   }
-  tbody.innerHTML = data.items.map(it => {
-    const o = it.official || {};
-    return `<tr>
-      <td>${it.code}</td>
-      <td>${it.name || '—'}</td>
-      <td class="muted">${it.sector}</td>
-      <td class="num">${it.last_price ? it.last_price.toFixed(2) : '—'}</td>
-      <td class="num ${signClass(it.est_net_value)}">${money(it.est_net_value)}</td>
-      <td class="num">${pct(it.foreign_ratio, 2)}</td>
-      <td class="num ${signClass(o.foreign_net)}">${lots(o.foreign_net)}</td>
-      <td class="num ${signClass(o.trust_net)}">${lots(o.trust_net)}</td>
-      <td class="num ${signClass(o.total_net)}">${lots(o.total_net)}</td>
-    </tr>`;
-  }).join('');
+  tbody.innerHTML = rows.join('');
+  tbody.querySelectorAll('[data-remove]').forEach(btn => {
+    btn.addEventListener('click', () => removeCustomStock(btn.dataset.remove));
+  });
 }
+
+async function loadWatchlist() {
+  const data = await getJSON('data/watchlist.json');
+  defaultWatchlistItems = data.items || [];
+
+  if (!customWatchlist.length) {
+    renderWatchlistTable([]);
+    return;
+  }
+  const sources = await fetchLookupSources();
+  // 查不到的代號（例如剛好卡在資料還沒同步、或代號打錯了）不要讓整張表
+  // 消失，該檔先跳過，其餘照常顯示。
+  const resolved = customWatchlist.map(code => resolveFromSources(code, sources)).filter(Boolean);
+  renderWatchlistTable(resolved);
+}
+
+// 回傳是否真的加成功——輸入框只在成功時清空，失敗（重複／查無代號）
+// 要留著原字讓使用者看得到自己打了什麼、方便修正。
+async function addCustomStock(rawCode) {
+  const msgEl = document.getElementById('watchlist-add-msg');
+  const code = rawCode.trim();
+  msgEl.hidden = true;
+
+  if (!code) return false;
+  const already = defaultWatchlistItems.some(it => it.code === code) || customWatchlist.includes(code);
+  if (already) {
+    msgEl.textContent = `${code} 已經在清單裡了。`;
+    msgEl.hidden = false;
+    return false;
+  }
+
+  const item = await fetchLookupSources()
+    .then(sources => resolveFromSources(code, sources))
+    .catch(() => null);
+  if (!item) {
+    msgEl.textContent = `找不到代號 ${code} 的資料——確認代號是否正確，`
+      + '或這檔今天還沒有任何官方／推估資料。';
+    msgEl.hidden = false;
+    return false;
+  }
+
+  customWatchlist.push(code);
+  saveCustomWatchlist(customWatchlist);
+  await loadWatchlist();
+  return true;
+}
+
+function removeCustomStock(code) {
+  customWatchlist = customWatchlist.filter(c => c !== code);
+  saveCustomWatchlist(customWatchlist);
+  loadWatchlist().catch(err => console.warn('移除自選股後重新載入失敗:', err));
+}
+
+document.getElementById('watchlist-add-form').addEventListener('submit', e => {
+  e.preventDefault();
+  const input = document.getElementById('watchlist-add-input');
+  addCustomStock(input.value)
+    .then(ok => { if (ok) input.value = ''; })
+    .catch(err => console.warn('加入自選股失敗:', err));
+});
 
 async function loadInstitutional() {
   const data = await getJSON('data/institutional.json');
