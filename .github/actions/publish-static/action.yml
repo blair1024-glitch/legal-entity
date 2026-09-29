@@ -1,0 +1,63 @@
+name: Publish static export
+description: >
+  把儀表板資料匯出成靜態 JSON 發布到 docs/data/（main 分支），並把累積用的
+  SQLite 資料庫存回 state/twflow.db（data-state 分支）。
+
+  export-static 本身是 all-or-nothing——任一步算失敗就整個 raise，這裡
+  完全不會執行到，docs/ 上一輪成功發布的內容維持原樣。兩邊的 commit 也都
+  先確認真的有變動才動作，避免每次都留下一個空 commit。
+
+  前提：呼叫這個 action 之前，已經用 checkout-state 這個 action 把
+  data-state 分支簽到 state/ 目錄。
+
+inputs:
+  config:
+    description: 傳給 twflow -c 的設定檔路徑
+    required: false
+    default: ci/config.ci.yaml
+
+runs:
+  using: composite
+  steps:
+    - name: 匯出靜態 JSON
+      shell: bash
+      run: twflow -c ${{ inputs.config }} export-static --out-dir docs/data
+
+    - name: 同步前端共用資源（web/ 是唯一來源，這裡只是複製）
+      shell: bash
+      run: |
+        cp web/style.css docs/style.css
+        cp web/shared/render.js docs/shared/render.js
+        cp web/favicon.svg docs/favicon.svg
+
+    - name: 設定 commit 身分
+      shell: bash
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git -C state config user.name "github-actions[bot]"
+        git -C state config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+    - name: 發布靜態資料到 main
+      shell: bash
+      run: |
+        set -e
+        git add docs/data docs/style.css docs/shared/render.js docs/favicon.svg
+        if git diff --cached --quiet; then
+          echo "docs/ 沒有變動，略過 commit"
+        else
+          git commit -q -m "chore: 更新儀表板靜態資料 [skip ci]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+        fi
+
+    - name: 發布累積資料庫到 data-state
+      shell: bash
+      run: |
+        set -e
+        git -C state add -A
+        if git -C state diff --cached --quiet; then
+          echo "state/twflow.db 沒有變動，略過 commit"
+        else
+          git -C state commit -q -m "chore: 更新累積資料庫 [skip ci]"
+          git -C state push origin HEAD:data-state
+        fi

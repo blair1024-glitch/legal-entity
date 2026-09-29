@@ -1,0 +1,33 @@
+name: Checkout data-state worktree
+description: >
+  把累積資料庫所在的 data-state 分支簽出到 state/ 目錄（用 git worktree，
+  跟主要checkout共用同一份 .git，因此也共用 actions/checkout 設好的推送
+  憑證，不必額外處理認證）。第一次執行時 data-state 分支還不存在，
+  會自動建立一個乾淨的孤兒分支。
+
+  必須放在 actions/checkout（main）之後執行，因為它是在既有的 repo
+  裡開 worktree，不是自己重新 clone 一份。
+
+runs:
+  using: composite
+  steps:
+    - name: 建立或還原 state/ worktree
+      shell: bash
+      run: |
+        set -e
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+        git fetch origin data-state 2>/dev/null || true
+
+        if git show-ref --verify --quiet refs/remotes/origin/data-state; then
+          git worktree add -B data-state state origin/data-state
+        else
+          echo "data-state 分支還不存在，建立新的孤兒分支"
+          git worktree add --detach state HEAD
+          git -C state checkout --orphan data-state
+          # --orphan 保留了目前工作樹的內容（也就是 main 分支的原始碼），
+          # 但這條分支只該放 state/twflow.db，不該混進 src/、web/ 這些檔案。
+          git -C state rm -rf . >/dev/null 2>&1 || true
+          git -C state commit -q --allow-empty -m "chore: init data-state branch"
+        fi

@@ -12,6 +12,7 @@
     twflow serve     啟動網頁儀表板
     twflow demo      產生合成資料，讓儀表板在沒有外網時也能完整展示
     twflow fixtures  產生合成 fixture 樣本，讓離線也能跑完整的 doctor
+    twflow export-static  匯出成靜態 JSON，供 GitHub Actions + Pages 使用
 """
 
 from __future__ import annotations
@@ -204,9 +205,16 @@ def cmd_poll(args, config: Config) -> int:
 
 def cmd_eod(args, config: Config) -> int:
     from .pipeline import run_eod, run_eod_range
+    from .tradingcal import eod_data_ready
 
     if args.since:
         return _eod_range(args, config)
+
+    if getattr(args, "skip_if_not_ready", False) and not eod_data_ready():
+        # 給排程用：非交易日、或還沒到官方資料通常就緒的時間（16:00 台北）
+        # 就直接略過，而不是白跑一次抓取。這不是失敗，回傳 0。
+        print("非交易日，或還沒到官方資料通常就緒的時間（16:00 台北）——略過。")
+        return 0
 
     day = _parse_date(args.date)
     with Store(config.get("db_path")) as store:
@@ -349,6 +357,27 @@ def cmd_fixtures(args, config: Config) -> int:
     return 0
 
 
+# ---------- export-static ----------
+
+def cmd_export_static(args, config: Config) -> int:
+    """把儀表板資料算好存成靜態 JSON，供 GitHub Pages 用.
+
+    全部算完才寫檔——任一步失敗就整個 raise、不寫任何檔案，讓呼叫端
+    （GitHub Actions）的失敗判斷可以只看這支指令的離開碼：非 0 就代表
+    這一輪不該發布，維持 Pages 上一次成功的內容。
+    """
+    from .static_export import build_export, write_export
+
+    with Store(config.get("db_path")) as store:
+        outputs = build_export(store, config, date=args.date)
+        written = write_export(outputs, args.out_dir)
+
+    print(f"已匯出 {len(written)} 個檔案到 {args.out_dir}：")
+    for path in written:
+        print(f"  · {path.name}")
+    return 0
+
+
 # ---------- entry ----------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -383,6 +412,10 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--date", help="交易日 YYYY-MM-DD，預設為上一個交易日")
     e.add_argument("--since", help="回補起始日 YYYY-MM-DD（改為區間模式）")
     e.add_argument("--until", help="回補結束日 YYYY-MM-DD，預設今天")
+    e.add_argument(
+        "--skip-if-not-ready", action="store_true",
+        help="非交易日或官方資料應該還沒發布時，略過而非嘗試抓取（供排程使用）",
+    )
     e.set_defaults(func=cmd_eod)
 
     au = sub.add_parser("auto", help="盤中輪詢 + 收盤後自動跑盤後流程")
@@ -395,6 +428,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     fx = sub.add_parser("fixtures", help="產生合成 fixture 樣本")
     fx.set_defaults(func=cmd_fixtures)
+
+    es = sub.add_parser("export-static", help="把儀表板資料匯出成靜態 JSON，供 GitHub Pages 使用")
+    es.add_argument("--out-dir", default="docs/data", help="輸出目錄")
+    es.add_argument("--date", help="交易日 YYYY-MM-DD，預設抓最新一天")
+    es.set_defaults(func=cmd_export_static)
 
     dm = sub.add_parser("demo", help="產生合成示範資料（離線檢視用）")
     dm.add_argument("--days", type=int, default=3, help="產生幾個交易日")

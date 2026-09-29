@@ -1,23 +1,43 @@
-/* 儀表板前端邏輯。
+/* GitHub Pages 靜態版的資料載入邏輯。
  *
- * 設計原則：任何顯示推估值的地方都必須看得出它是推估值。免責說明由後端
- * 隨資料一起回傳（每個資金流端點都有 disclaimer 欄位），前端只是把它渲染
- * 出來——這樣就不會有某個畫面漏標的情況。
+ * 純渲染函式（money/renderQuadrant/renderRankList/…）在 shared/render.js，
+ * 與本機版（web/app.js）共用——這裡只負責「資料從哪裡來」：固定檔名的
+ * 靜態 JSON（由 GitHub Actions 定時算好發布），不是即時 API。
  *
- * 純渲染函式（money/lots/pct/signClass/renderQuadrant/renderRankList/
- * quadrantBadge/QUADRANT_COLORS）在 shared/render.js，本機版與 GitHub
- * Pages 靜態版共用，這裡只負責「資料從哪裡來」。
+ * 因此這裡刻意不做任何跨次呼叫的快取：資料本來就是每 10-15 分鐘才更新
+ * 一次，每次載入都直接 fetch 最新的靜態檔（帶時間戳避免瀏覽器快取到
+ * 上一輪），邏輯上比本機版更單純，不必煩惱「快取何時該失效」。
  */
 
-const REFRESH_MS = 30000;
+const REFRESH_MS = 5 * 60 * 1000; // 資料本身更新頻率遠低於本機版，30 秒轮询沒有意義
 
 // 目前鑽取的板塊（null = 看全市場個股）。點板塊泡泡或板塊排行列即可切換。
 let selectedSector = null;
 
-async function getJSON(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`${url} → HTTP ${res.status}`);
+async function getJSON(path) {
+  const res = await fetch(`${path}?_=${Date.now()}`);
+  if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`);
   return res.json();
+}
+
+function formatGeneratedAt(iso) {
+  if (!iso) return null;
+  try {
+    return new Date(iso).toLocaleString('zh-TW', {
+      timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric',
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    }) + ' 台北時間';
+  } catch {
+    return null;
+  }
+}
+
+// 個股全量清單（stocks_full.json）沒有像 API 一樣先做頭尾裁切，
+// 預設檢視（未選板塊）要自己重現「買超榜 + 賣超榜」各取 N 檔的邏輯，
+// 對應 quadrant.py 的 rank_stocks()：兩端各取 limit 檔，中間略過。
+function topAndBottom(rows, limit) {
+  if (rows.length <= limit * 2) return rows;
+  return rows.slice(0, limit).concat(rows.slice(-limit));
 }
 
 /* ---------- 四象限圖 ---------- */
@@ -31,12 +51,13 @@ const chart = echarts.init(document.getElementById('quadrant-chart'), null, {
 async function loadQuadrant() {
   const win = document.getElementById('window-select').value;
   const showTrail = document.getElementById('trail-toggle').checked;
-  const trail = showTrail ? '&trail=6&trail_step=20&trail_top=6' : '';
-  const data = await getJSON(`/api/quadrant?window=${win}${trail}`);
+  const data = await getJSON(`data/quadrant_${win}.json`);
 
   document.getElementById('trail-foot').hidden = !showTrail;
 
-  renderQuadrant(chart, data);
+  // 靜態匯出一律把輪動軌跡算好放進檔案（不像 API 可以用查詢參數決定
+  // 要不要算），勾選與否只是要不要把它畫出來。
+  renderQuadrant(chart, showTrail ? data : { ...data, trail: {} });
   document.getElementById('disclaimer-text').textContent = data.disclaimer || '';
 
   // 開盤初期視窗會自動縮短，要讓使用者知道現在看的是幾分鐘的動能
@@ -52,7 +73,7 @@ async function loadQuadrant() {
     noteEl.hidden = true;
   }
 
-  // 板塊排行沿用同一份資料，不必再打一次 API
+  // 板塊排行沿用同一份資料，不必再打一次
   const sectorEl = document.getElementById('sector-rank');
   renderRankList(sectorEl, data.points, {
     label: p => `${p.sector} <small>${p.constituents}檔</small>`,
@@ -82,21 +103,22 @@ async function loadQuadrant() {
 }
 
 async function loadStocks() {
-  const q = selectedSector
-    ? `?sector=${encodeURIComponent(selectedSector)}`
-    : '?limit=15';
-  const data = await getJSON(`/api/stocks${q}`);
+  const full = await getJSON('data/stocks_full.json');
+  const all = full.stocks || [];
+  const rows = selectedSector
+    ? all.filter(s => s.sector === selectedSector)
+    : topAndBottom(all, 15);
 
   document.getElementById('stock-rank-title').textContent =
     selectedSector ? `${selectedSector} · 成分股` : '個股資金流排行';
   document.getElementById('clear-sector').hidden = !selectedSector;
 
   const el = document.getElementById('stock-rank');
-  if (selectedSector && !data.stocks.length) {
+  if (selectedSector && !rows.length) {
     el.innerHTML = '<div class="empty">這個板塊今天還沒有成交資料。</div>';
     return;
   }
-  renderRankList(el, data.stocks, {
+  renderRankList(el, rows, {
     label: s => `${s.code} ${s.name || ''} <small>${s.sector}</small>`,
     value: s => s.net_value,
   });
@@ -109,11 +131,11 @@ function selectSector(sector) {
 }
 
 async function loadWatchlist() {
-  const data = await getJSON('/api/watchlist');
+  const data = await getJSON('data/watchlist.json');
   const tbody = document.querySelector('#watchlist-table tbody');
   if (!data.items.length) {
     tbody.innerHTML = '<tr><td colspan="9" class="muted">自選股清單是空的，'
-      + '請編輯 config.yaml 的 watchlist。</td></tr>';
+      + '請編輯 ci/config.ci.yaml 的 watchlist。</td></tr>';
     return;
   }
   tbody.innerHTML = data.items.map(it => {
@@ -133,12 +155,12 @@ async function loadWatchlist() {
 }
 
 async function loadInstitutional() {
-  const data = await getJSON('/api/institutional?limit=10');
+  const data = await getJSON('data/institutional.json');
   const el = document.getElementById('insti-rank');
   const rows = [...(data.buy || []), ...(data.sell || [])];
   if (!rows.length) {
-    el.innerHTML = '<div class="empty">尚無官方三大法人資料——收盤後執行 '
-      + '<code>twflow eod</code> 取得。</div>';
+    el.innerHTML = '<div class="empty">尚無官方三大法人資料——'
+      + '等下一次 GitHub Actions 收盤後排程執行。</div>';
     return;
   }
   // 官方買賣超單位是股，這裡直接顯示張數
@@ -155,7 +177,7 @@ async function loadInstitutional() {
 }
 
 async function loadFutures() {
-  const data = await getJSON('/api/futures');
+  const data = await getJSON('data/futures.json');
   const el = document.getElementById('futures-panel');
   if (!data.rows || !data.rows.length) {
     el.innerHTML = '<div class="empty">尚無期貨法人資料。</div>';
@@ -170,7 +192,7 @@ async function loadFutures() {
 }
 
 async function loadBrokers() {
-  const data = await getJSON('/api/brokers?limit=10');
+  const data = await getJSON('data/brokers.json');
   const el = document.getElementById('brokers-panel');
   if (!data.available || !data.rows.length) {
     el.innerHTML = `<div class="empty">${data.note || '尚無分點資料。'}</div>`;
@@ -185,15 +207,26 @@ async function loadBrokers() {
 }
 
 async function loadMeta() {
-  const m = await getJSON('/api/meta');
+  const m = await getJSON('data/meta.json');
   const pill = document.getElementById('session-pill');
   pill.textContent = m.session_open ? '● 盤中' : '○ 已收盤';
   pill.className = `pill ${m.session_open ? 'open' : 'closed'}`;
 
+  const pipeline = m.pipeline || {};
+  const generatedAt = formatGeneratedAt(pipeline.generated_at_utc);
+
   document.getElementById('meta-line').textContent =
     `${m.securities} 檔 · ${m.sectors} 板塊（${m.custom_classified} 檔細分）`
     + (m.latest_flow_date ? ` · 盤中資料 ${m.latest_flow_date}` : '')
-    + (m.latest_insti_date ? ` · 官方數據 ${m.latest_insti_date}` : '');
+    + (m.latest_insti_date ? ` · 官方數據 ${m.latest_insti_date}` : '')
+    + (generatedAt ? ` · 產生於 ${generatedAt}` : '');
+
+  // 兩個旗標都是 false 代表 Actions 連一次真實資料都沒抓到過——
+  // 這跟「今天還沒開盤所以是空的」是完全不同的兩件事，必須分開講清楚。
+  const neverFetched = document.getElementById('never-fetched-banner');
+  if (neverFetched) {
+    neverFetched.hidden = Boolean(pipeline.ever_fetched_intraday || pipeline.ever_fetched_official);
+  }
 }
 
 /* ---------- 啟動 ---------- */

@@ -3,6 +3,9 @@
 盤中把各板塊的資金流向畫成**四象限輪動圖**（加速流入／流入但放緩／加速流出／
 流出但放緩），收盤後用證交所官方三大法人數據**校準推估值**並顯示準確度。
 
+> 兩種跑法：本機 Mac 版（`twflow auto` + `twflow serve`，即時但要開機）
+> 或 [GitHub Pages 版](#github-pages-版)（不用開機，但約 10 分鐘才更新一次）。
+
 ---
 
 ## ⚠️ 先讀這段：盤中數字是推估值
@@ -271,17 +274,23 @@ retention_days: 30
 
 ```
 src/twflow/
-├── flow.py         內外盤 tick rule 分類（推估的核心）
-├── quadrant.py     四象限座標與分類
-├── sectors.py      兩層板塊分類與彙總
-├── calibrate.py    盤後校準：Spearman、方向一致率、迴歸係數
-├── poller.py       盤中輪詢迴圈
-├── pipeline.py     盤後流程協調（單一來源失敗不中斷整批）
-├── store.py        SQLite（每分鐘彙總，非原始快照）
-├── httpclient.py   限流、重試、live/fixture/record 三模式
-├── api.py          FastAPI 後端
-└── sources/        各資料來源的抓取與解析
-web/                儀表板前端（ECharts 已 vendor，離線可用）
+├── flow.py           內外盤 tick rule 分類（推估的核心）
+├── quadrant.py       四象限座標與分類
+├── sectors.py        兩層板塊分類與彙總
+├── calibrate.py      盤後校準：Spearman、方向一致率、迴歸係數
+├── poller.py         盤中輪詢迴圈
+├── pipeline.py       盤後流程協調（單一來源失敗不中斷整批）
+├── store.py          SQLite（每分鐘彙總，非原始快照）
+├── httpclient.py     限流、重試、live/fixture/record 三模式
+├── views.py          8 個資料組裝的純函式，api.py 與 static_export.py 共用
+├── api.py            FastAPI 後端（route handler 呼叫 views.py）
+├── static_export.py  匯出成靜態 JSON，供 GitHub Pages 用
+└── sources/          各資料來源的抓取與解析
+web/                  本機版前端（ECharts 已 vendor，離線可用）
+├── shared/render.js  純渲染函式，web/ 與 docs/ 共用
+docs/                 GitHub Pages 版前端（讀靜態 JSON，非即時 API）
+├── data/             Actions 排程寫入的靜態 JSON（不是手動維護的內容）
+└── shared/, style.css, favicon.svg   由 Actions 從 web/ 複製過去，非手寫副本
 ```
 
 盤中原始快照不落地——量太大又沒有分析價值。只存**每分鐘彙總**
@@ -342,7 +351,7 @@ lock 檔要進版控。這樣版本漂移造成的失敗只會在你主動更新
 
 ```bash
 pip install -r requirements-dev.lock
-pytest                      # 217 個測試，全程離線
+pytest                      # 全程離線
 twflow fixtures             # 重新產生合成 fixture 樣本
 twflow --mode fixture doctor   # 離線跑診斷
 ```
@@ -378,6 +387,76 @@ journalctl --user -u twflow -f
 
 macOS 用 launchd、或直接 `tmux new -s twflow 'twflow auto'` 也可以——
 重點是讓它在盤中持續跑，因為**盤中推估資料無法事後回補**。
+
+---
+
+## GitHub Pages 版
+
+`twflow auto` + `twflow serve` 是本機版，優點是即時（30 秒更新一次）、
+資料完整（含選配的券商分點），缺點是**電腦要開著**。出國沒帶電腦、或只是
+想用手機看一眼時，可以改用這條路：GitHub Actions 定時抓資料算好，
+發布到 GitHub Pages，手機瀏覽器開個固定連結就能看——**跟本機版完全獨立、
+互不影響**，兩條路可以同時用。
+
+### 一次性設定
+
+1. **Repo 改為 Public**（Settings → General → Danger Zone → Change visibility）
+   ——GitHub Pages 與 Actions 排程分鐘數要免費長期用，repo 得是公開的。
+   `config.yaml`、你自己的自選股清單本來就在 `.gitignore` 排除；資料庫裡
+   也只有從公開資料源算出的公開市場數據，沒有新的洩漏面。
+2. **啟用 Pages**（Settings → Pages → Source 選 `Deploy from a branch`，
+   分支選 `main`，資料夾選 `/docs`）
+3. **手動跑第一次**（Actions 分頁 → `twflow · 盤後` → Run workflow）——
+   這一步會順便把證券清單種進 `data-state` 分支，之後排程才有意義。
+   跑完後幾分鐘，`https://<你的 GitHub 帳號>.github.io/<repo 名稱>/`
+   應該就看得到頁面了（第一次通常還是空的，見下方說明）。
+
+設定好之後就不用再管了——`.github/workflows/twflow-poll.yml` 與
+`twflow-eod.yml` 會依台北時間自動排程執行。
+
+### 跟本機版的差異
+
+| | 本機 Mac 版 | GitHub Pages 版 |
+|---|---|---|
+| 更新頻率 | 盤中約 30–60 秒 | 盤中約每 10 分鐘 |
+| 需要開機 | 是 | 否 |
+| 券商分點（官股動向） | 支援（手動匯入 CSV） | 不支援——Actions 環境沒有人可以手動下載驗證碼保護的 CSV |
+| 圖表庫來源 | 本機 vendor（離線可用） | CDN（jsdelivr，需要網路） |
+
+### 「這個網頁目前顯示的還不是真實資料」
+
+這行紅字代表 GitHub Actions **連一次真實資料都還沒抓到過**——可能是排程
+還沒執行、還在等第一次手動觸發，或是 Actions 執行環境連不到證交所／
+櫃買／期交所。這是刻意保留的誠實提示，不是 bug：本工具原本就是在連不到
+這些資料源的環境開發的（見上方「為什麼 ①②③ 是必要的」），Actions
+runner（Azure 代管）連不連得上這些站台，在合併這個功能前完全沒有測過。
+
+確認狀態的方式：
+
+- 頁面上的「產生於 ⋯」時間戳——每次 Actions 執行都會更新，就算那一輪
+  沒抓到新資料也一樣，所以能看出排程有沒有在跑
+- repo 的 **Actions 分頁**——看 `twflow · 盤中輪詢` / `twflow · 盤後`
+  有沒有在正常時間執行、有沒有紅字
+- `docs/data/meta.json` 的 `pipeline` 欄位——`ever_fetched_intraday` /
+  `ever_fetched_official` 兩個旗標只要有一個變成 `true`，代表至少成功過一次
+
+如果排程一直跑但這個旗標始終是 `false`，代表 Actions 環境連不到台股資料源
+——這種情況下本機 Mac 版不受影響，仍然照常運作。
+
+### `data-state` 分支是什麼
+
+repo 裡會多一個 `data-state` 分支，看起來很奇怪但是預期的：四象限與輪動
+軌跡需要整個交易日的盤中資料累積，不是單一時間點，所以 Actions 每次執行
+之間要有辦法接續前一輪的資料庫。由於 Actions 每次都是全新環境，這個累積
+用的 SQLite 資料庫就放在這個獨立分支（路徑 `state/twflow.db`），跟 `main`
+分支的原始碼、跟本機 Mac 版的 `data/twflow.db`（`.gitignore` 排除）完全
+是兩回事——**這條分支是給機器讀寫的，不需要人去看它**，也不會出現在
+你本機 `git pull` 的內容裡（除非你自己 `git checkout data-state`）。
+
+它會持續變大（每次 Actions 執行大約一個 commit），所以有一個每月執行一次
+的 `twflow-compact-state.yml` 排程會重建它的歷史，只保留當下內容、丟掉
+舊版本——這是整個管線裡唯一會用 force-push 的地方，而且刻意限定在這條
+機器專用的分支上。
 
 ---
 

@@ -1,0 +1,54 @@
+name: twflow · 盤後
+
+# 16:00 台北是官方三大法人資料通常就緒的時間，10 分鐘緩衝後主要執行一次，
+# 再 30 分鐘後備援一次——eod 全部是 upsert，重跑安全，備援只是防主要那次
+# 官方資料剛好還沒發布完成。
+on:
+  schedule:
+    - cron: '10 8 * * 1-5'   # 16:10 台北
+    - cron: '40 8 * * 1-5'   # 16:40 台北，備援
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: twflow-state
+  cancel-in-progress: false
+
+jobs:
+  eod:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安裝 twflow
+        run: |
+          pip install -r requirements-dev.lock
+          pip install -e . --no-deps
+
+      - name: 準備 data-state worktree
+        uses: ./.github/actions/checkout-state
+
+      # 每次都重新 sync 而不是只在第一次跑：這是 upsert，重跑安全，
+      # 同時也是這個管線唯一的「證券清單種子」來源——securities 表原本
+      # 是空的，第一次手動或排程觸發這個 workflow 時，這步順便把它種起來，
+      # 不需要另外一個專門的 bootstrap 步驟。
+      - name: 同步證券清單與產業別
+        continue-on-error: true
+        run: twflow -c ci/config.ci.yaml sync
+
+      # 同樣允許失敗不中斷：連不上證交所/櫃買/期交所時，state/twflow.db
+      # 裡先前的資料不受影響，仍要把「目前真實狀態」發布出去。
+      - name: 盤後流程（非交易日自動略過）
+        continue-on-error: true
+        run: twflow -c ci/config.ci.yaml eod --skip-if-not-ready
+
+      - name: 發布靜態資料與累積資料庫
+        uses: ./.github/actions/publish-static

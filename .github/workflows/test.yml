@@ -3,6 +3,10 @@ name: tests
 on:
   push:
     branches: ["**"]
+    # twflow-poll / twflow-eod 排程只會動 docs/data/**，commit message 也帶
+    # [skip ci]；這條 paths-ignore 是雙保險，避免那些自動 commit 每次都
+    # 重新跑一輪完整的測試矩陣加煙霧測試。
+    paths-ignore: ["docs/data/**"]
   pull_request:
 
 jobs:

@@ -1,0 +1,52 @@
+name: twflow · 盤中輪詢
+
+# cron 全部是 UTC，台北 = UTC+8（無日光節約，換算固定）。
+# 09:00–13:30 台北盤中，每 10 分鐘一輪，刻意偏移 :03 避開整點壅塞
+# （GitHub 官方建議）。是否真的抓資料交給 `twflow poll` 自己用
+# is_session_open() 判斷，這裡的 cron 只是「大概這個時間再來確認一次」，
+# 不假設它會準時——排程延遲或跳過本來就是 GitHub Actions 排程的常態。
+on:
+  schedule:
+    - cron: '3,13,23,33,43,53 1-4 * * 1-5'
+    - cron: '3,13,23 5 * * 1-5'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+# 跟 eod、compact-state 共用同一個 group：三者都會推 data-state 分支，
+# 序列化執行才不會互相把對方剛 push 的 commit 蓋掉。
+concurrency:
+  group: twflow-state
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安裝 twflow
+        run: |
+          pip install -r requirements-dev.lock
+          pip install -e . --no-deps
+
+      - name: 準備 data-state worktree
+        uses: ./.github/actions/checkout-state
+
+      # 刻意不用 continue-on-error 以外的容錯：securities 表是空的（還沒
+      # 跑過第一次 sync）或連不上證交所都會讓這步回傳非 0，但
+      # state/twflow.db 裡先前輪詢累積的資料完全不受影響，下面還是要
+      # 把「目前真實狀態」發布出去，所以這步失敗不該擋住 publish。
+      - name: 盤中輪詢（單輪，非交易時段自動略過）
+        continue-on-error: true
+        run: twflow -c ci/config.ci.yaml poll --once
+
+      - name: 發布靜態資料與累積資料庫
+        uses: ./.github/actions/publish-static

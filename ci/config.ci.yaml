@@ -1,0 +1,9 @@
+# GitHub Actions 專用設定。
+#
+# 本機 Mac 版用的是 config.yaml（.gitignore 排除，使用者自己的機器才有），
+# 這份反過來——是特地要進版控、給 Actions runner 讀的，所以裡面不能有
+# 任何本機路徑或密鑰，只放這個環境真正需要覆寫的項目，其餘沿用
+# src/twflow/config.py 的 DEFAULTS。
+mode: live
+db_path: state/twflow.db
+retention_days: 3

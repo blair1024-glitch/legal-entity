@@ -1,0 +1,43 @@
+name: twflow · 壓縮 data-state 分支
+
+# data-state 分支每次 poll/eod 執行都會 commit 一次 SQLite 檔案，
+# 幾乎等於整包產生新 blob——一天約 20-30 輪，長期下來歷史會無限膨脹。
+# 這個 workflow 每月一次，把目前內容重建成一個全新的孤兒分支歷史，
+# 只保留「現在的樣子」，把舊版本全部丟掉。
+#
+# 這是整個管線唯一允許 force-push 的地方，而且刻意限定在這條
+# 「機器寫、人不看」的分支——data-state 從來不存放使用者自己的工作，
+# 壓縮掉舊歷史不會弄丟任何人手動寫的東西。
+on:
+  schedule:
+    - cron: '0 20 1 * *'   # 每月 1 日 UTC 20:00 = 台北隔日（2 日）04:00，避開所有交易時段
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: twflow-state
+  cancel-in-progress: false
+
+jobs:
+  compact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: data-state
+          fetch-depth: 1
+
+      - name: 用目前內容重建乾淨的孤兒分支
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git checkout --orphan data-state-compacted
+          git add -A
+          git commit -q -m "chore: 壓縮 data-state 歷史（保留目前內容，捨棄舊版本）"
+          git branch -M data-state-compacted data-state
+          git push --force origin data-state

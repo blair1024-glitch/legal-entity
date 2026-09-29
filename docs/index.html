@@ -4,21 +4,28 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>台股法人資金流向 · 板塊輪動</title>
-<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 
 <header class="topbar">
   <div class="brand">
     <h1>板塊輪動</h1>
-    <span class="sub">台股法人資金流向</span>
+    <span class="sub">台股法人資金流向 · GitHub Pages 版</span>
   </div>
   <div class="status" id="status">
     <span class="pill" id="session-pill">載入中…</span>
     <span class="meta" id="meta-line"></span>
   </div>
 </header>
+
+<div class="banner banner-critical" id="never-fetched-banner" hidden>
+  <strong>這個網頁目前顯示的還不是真實資料。</strong>
+  <span>GitHub Actions 排程尚未成功連上證交所／櫃買／期交所抓到過任何一次資料——
+  可能是排程還沒執行、還在等第一次手動觸發，或執行環境連不到這些資料源。
+  這不影響本機 Mac 版（<code>./twflow serve</code>）。</span>
+</div>
 
 <div class="banner" id="disclaimer-banner">
   <strong>盤中數字是推估值，不是官方法人買賣超。</strong>
@@ -105,6 +112,11 @@
         因此每天收盤後，系統會把當天的推估值和官方三大法人買賣超做比對，
         算出<b>推估準確度</b>顯示在右上角。這個數字就是要讓你自己判斷
         今天的圖能信到什麼程度——它不會永遠是高的。
+      </p>
+      <p class="note">
+        這個頁面由 GitHub Actions 定時抓資料、算好後發布到 GitHub Pages，
+        更新頻率約每 10–15 分鐘一次，不是即時的——如果需要接近即時（約
+        30 秒更新一次），請用本機 Mac 版的 <code>./twflow serve</code>。
       </p>
       <p class="warn">本工具僅供研究參考，不構成任何投資建議。</p>
     </div>
@@ -208,12 +220,13 @@
 <footer>
   <p>
     資料來源：臺灣證券交易所、證券櫃檯買賣中心、臺灣期貨交易所。
-    盤中資金流為本工具推估值。<b>本工具僅供研究參考，不構成投資建議。</b>
+    盤中資金流為本工具推估值。此頁面由 GitHub Actions 排程更新，約每
+    10–15 分鐘一次。<b>本工具僅供研究參考，不構成投資建議。</b>
   </p>
 </footer>
 
-<script src="/static/vendor/echarts.min.js"></script>
-<script src="/static/shared/render.js"></script>
-<script src="/static/app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+<script src="shared/render.js"></script>
+<script src="app.js"></script>
 </body>
 </html>
