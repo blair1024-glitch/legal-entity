@@ -44,17 +44,24 @@ function signClass(v) {
 
 /* ---------- 四象限圖 ---------- */
 
-function renderQuadrant(chart, data) {
+function renderQuadrant(chart, data, opts = {}) {
   const points = data.points || [];
 
   if (!points.length) {
     // 空白畫面要說清楚三件事：為什麼空的、已經有什麼、下一步做什麼。
     // 只說「尚無資料」會讓人以為是壞掉了。
-    const sub = data.has_official
-      ? `官方三大法人數據已就緒（${data.official_date}）—— 往下捲即可查看。\n`
-        + '四象限需要盤中即時資料，而它只能在盤中累積、事後無法回補。\n'
-        + '下個交易日 09:00 前執行 ./twflow auto，這張圖就會開始長出來。'
-      : '盤中執行 ./twflow auto 開始累積，或用 ./twflow demo 產生合成資料先看介面。';
+    //
+    // 「下一步做什麼」在本機版與 GitHub Pages 版是兩件不同的事——本機版要
+    // 使用者自己執行指令，Pages 版是排程自動處理、使用者什麼都不用做。
+    // 兩邊共用這個函式，所以文字內容改由呼叫端決定，這裡只放本機版的
+    // 預設值（web/app.js 沿用這個預設，不用改呼叫方式）。
+    const sub = opts.emptyMessage ? opts.emptyMessage(data) : (
+      data.has_official
+        ? `官方三大法人數據已就緒（${data.official_date}）—— 往下捲即可查看。\n`
+          + '四象限需要盤中即時資料，而它只能在盤中累積、事後無法回補。\n'
+          + '下個交易日 09:00 前執行 ./twflow auto，這張圖就會開始長出來。'
+        : '盤中執行 ./twflow auto 開始累積，或用 ./twflow demo 產生合成資料先看介面。'
+    );
 
     chart.clear();
     chart.setOption({

@@ -57,7 +57,17 @@ async function loadQuadrant() {
 
   // 靜態匯出一律把輪動軌跡算好放進檔案（不像 API 可以用查詢參數決定
   // 要不要算），勾選與否只是要不要把它畫出來。
-  renderQuadrant(chart, showTrail ? data : { ...data, trail: {} });
+  renderQuadrant(chart, showTrail ? data : { ...data, trail: {} }, {
+    // 空畫面的「下一步」在這個版本是排程自動處理，不是要使用者手動下指令
+    // ——render.js 的預設文字是寫給本機版的，這裡蓋掉。
+    emptyMessage: d => d.has_official
+      ? `官方三大法人數據已就緒（${d.official_date}）—— 往下捲即可查看。\n`
+        + '四象限需要盤中即時資料，而它只能在盤中累積、事後無法回補。\n'
+        + 'GitHub Actions 會在下個交易日盤中自動輪詢累積，不需要手動操作，\n'
+        + '過幾輪排程後這張圖就會開始長出來。'
+      : '尚無任何資料。GitHub Actions 可能還沒執行過第一輪，\n'
+        + '可以到 repo 的 Actions 分頁手動觸發一次「twflow · 盤後」試試看。',
+  });
   document.getElementById('disclaimer-text').textContent = data.disclaimer || '';
 
   // 開盤初期視窗會自動縮短，要讓使用者知道現在看的是幾分鐘的動能
