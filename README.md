@@ -4,7 +4,7 @@
 流出但放緩），收盤後用證交所官方三大法人數據**校準推估值**並顯示準確度。
 
 > 兩種跑法：本機 Mac 版（`twflow auto` + `twflow serve`，即時但要開機）
-> 或 [GitHub Pages 版](#github-pages-版)（不用開機，但約 10 分鐘才更新一次）。
+> 或 [GitHub Pages 版](#github-pages-版)（不用開機，但約 5 分鐘才更新一次）。
 
 ---
 
@@ -418,7 +418,7 @@ macOS 用 launchd、或直接 `tmux new -s twflow 'twflow auto'` 也可以——
 
 | | 本機 Mac 版 | GitHub Pages 版 |
 |---|---|---|
-| 更新頻率 | 盤中約 30–60 秒 | 盤中約每 10 分鐘 |
+| 更新頻率 | 盤中約 30–60 秒 | 盤中約每 5 分鐘 |
 | 需要開機 | 是 | 否 |
 | 券商分點（官股動向） | 支援（手動匯入 CSV） | 不支援——Actions 環境沒有人可以手動下載驗證碼保護的 CSV |
 | 圖表庫來源 | 本機 vendor（離線可用） | CDN（jsdelivr，需要網路） |
