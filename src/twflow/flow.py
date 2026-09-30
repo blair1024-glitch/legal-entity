@@ -48,6 +48,26 @@ class Quote:
         return self.bid1 > 0 and self.ask1 > 0 and self.ask1 >= self.bid1
 
 
+def limit_lock_state(bid1: float, ask1: float, price: float) -> str | None:
+    """判斷五檔是不是「鎖漲停／鎖跌停」的單邊狀態.
+
+    鎖漲停：買方排隊掛滿（bid1 > 0），賣方完全沒人掛（ask1 <= 0）。
+    鎖跌停則相反。這種情況下 ``has_book`` 會是 False，``classify()`` 只能
+    退回「價格有沒有變」的規則——但價格已經鎖死不會再變，於是永遠判成
+    中性、淨流卡在 0。這不是推估失敗，是這個方法在這個情境下本來就看不出
+    方向，值得在畫面上另外標示，而不是讓使用者誤以為「這檔今天沒動靜」。
+
+    兩邊皆為 0（例如盤前還沒開始撮合）不算鎖漲跌停，回傳 None。
+    """
+    if price <= 0:
+        return None
+    if bid1 > 0 and ask1 <= 0:
+        return "up"
+    if ask1 > 0 and bid1 <= 0:
+        return "down"
+    return None
+
+
 @dataclass
 class FlowIncrement:
     """兩次快照之間的資金流增量."""

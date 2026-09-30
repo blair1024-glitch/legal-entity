@@ -15,6 +15,7 @@ from twflow.flow import (
     Quote,
     buy_ratio_from_book,
     classify,
+    limit_lock_state,
 )
 
 TS0 = dt.datetime(2026, 8, 27, 9, 30, 0)
@@ -47,6 +48,24 @@ class TestBuyRatio:
     def test_crossed_book_falls_back_to_neutral(self):
         # 賣價低於買價是異常資料，不該讓它產生極端的方向判斷
         assert buy_ratio_from_book(100.0, 105.0, 95.0) == 0.5
+
+
+class TestLimitLockState:
+    def test_bid_only_is_locked_up(self):
+        assert limit_lock_state(bid1=110.0, ask1=0.0, price=110.0) == "up"
+
+    def test_ask_only_is_locked_down(self):
+        assert limit_lock_state(bid1=0.0, ask1=90.0, price=90.0) == "down"
+
+    def test_normal_two_sided_book_is_not_locked(self):
+        assert limit_lock_state(bid1=999.0, ask1=1001.0, price=1000.0) is None
+
+    def test_both_sides_empty_is_not_locked(self):
+        # 盤前還沒開始撮合，兩邊都是 0——這不是鎖漲跌停，是還沒開盤
+        assert limit_lock_state(bid1=0.0, ask1=0.0, price=0.0) is None
+
+    def test_invalid_price_is_not_locked(self):
+        assert limit_lock_state(bid1=110.0, ask1=0.0, price=0.0) is None
 
 
 class TestClassify:

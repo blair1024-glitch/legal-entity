@@ -65,6 +65,51 @@ class TestStocksView:
         assert len(by_sector["stocks"]) <= len(all_stocks["stocks"])
         assert all(s["sector"] == "晶圓代工" for s in by_sector["stocks"])
 
+    def test_flags_limit_up_lock_from_quote_state(self, store, config, fetcher):
+        # 五檔單邊掛滿（買方排隊、賣方掛不出來）＝鎖漲停，要在排行上標示出來，
+        # 不能讓使用者誤以為淨流卡在 0 是「今天沒動靜」。
+        sync_securities(store, fetcher, ["TWSE"])
+        store.add_flow_minute([
+            {"trade_date": DAY.isoformat(), "code": "2330",
+             "minute_ts": "2026-08-27T10:00:00", "net_value": 0.0,
+             "turnover_value": 1000.0, "last_price": 1000.0},
+        ])
+        store.save_quote_state([
+            {"code": "2330", "trade_date": DAY.isoformat(), "ts": "2026-08-27T10:00:00",
+             "price": 1000.0, "cum_volume": 500.0, "bid1": 1000.0, "ask1": 0.0},
+        ])
+        out = views.stocks_view(store, config, date=DAY.isoformat())
+        row = next(s for s in out["stocks"] if s["code"] == "2330")
+        assert row["limit_lock"] == "up"
+
+    def test_normal_book_yields_no_lock(self, store, config, fetcher):
+        sync_securities(store, fetcher, ["TWSE"])
+        store.add_flow_minute([
+            {"trade_date": DAY.isoformat(), "code": "2330",
+             "minute_ts": "2026-08-27T10:00:00", "net_value": 100.0,
+             "turnover_value": 1000.0, "last_price": 1000.0},
+        ])
+        store.save_quote_state([
+            {"code": "2330", "trade_date": DAY.isoformat(), "ts": "2026-08-27T10:00:00",
+             "price": 1000.0, "cum_volume": 500.0, "bid1": 999.0, "ask1": 1000.0},
+        ])
+        out = views.stocks_view(store, config, date=DAY.isoformat())
+        row = next(s for s in out["stocks"] if s["code"] == "2330")
+        assert row["limit_lock"] is None
+
+    def test_no_quote_state_row_yields_no_lock_not_an_error(self, store, config, fetcher):
+        # 沒輪詢到五檔（例如重啟後第一筆、或這檔今天沒被輪詢器看過）
+        # 一樣要能正常回傳，不該因為缺資料就整個報錯。
+        sync_securities(store, fetcher, ["TWSE"])
+        store.add_flow_minute([
+            {"trade_date": DAY.isoformat(), "code": "2330",
+             "minute_ts": "2026-08-27T10:00:00", "net_value": 100.0,
+             "turnover_value": 1000.0, "last_price": 1000.0},
+        ])
+        out = views.stocks_view(store, config, date=DAY.isoformat())
+        row = next(s for s in out["stocks"] if s["code"] == "2330")
+        assert row["limit_lock"] is None
+
 
 class TestWatchlistView:
     def test_pairs_estimate_with_official(self, store, config, fetcher):
@@ -74,6 +119,22 @@ class TestWatchlistView:
         row = out["items"][0]
         assert "est_net_value" in row
         assert "official" in row
+
+    def test_flags_limit_lock_for_watchlist_codes(self, store, config, fetcher):
+        run_eod(store, fetcher, DAY, markets=["TWSE"])
+        configured_code = views.watchlist_view(store, config, date=DAY.isoformat())["items"][0]["code"]
+        store.save_quote_state([
+            {"code": configured_code, "trade_date": DAY.isoformat(), "ts": "2026-08-27T10:00:00",
+             "price": 1000.0, "cum_volume": 500.0, "bid1": 0.0, "ask1": 900.0},
+        ])
+        out = views.watchlist_view(store, config, date=DAY.isoformat())
+        row = next(it for it in out["items"] if it["code"] == configured_code)
+        assert row["limit_lock"] == "down"
+
+    def test_no_quote_state_yields_no_lock_not_an_error(self, store, config, fetcher):
+        run_eod(store, fetcher, DAY, markets=["TWSE"])
+        out = views.watchlist_view(store, config, date=DAY.isoformat())
+        assert out["items"][0]["limit_lock"] is None
 
 
 class TestWatchlistLookupView:

@@ -296,3 +296,15 @@ function quadrantBadge(p) {
   const c = QUADRANT_COLORS[p.quadrant] || '#6e7b8a';
   return `<span class="qbadge" style="color:${c};background:${c}22">${p.quadrant}</span>`;
 }
+
+// 鎖漲停／鎖跌停：五檔單邊掛滿時，推估方法退回 tick rule，但價格已經鎖死
+// 不會再變，於是永遠判成中性、淨流卡在 0。這不是「今天沒動靜」，是這個
+// 方法在這個情境下本來就看不出方向——用徽章講清楚，不要讓 0 看起來像結論。
+// 顏色走既有 --up/--down 語意色（台股慣例：紅漲綠跌），跟象限色不同，
+// 所以走 CSS 變數而不是像 quadrantBadge 那樣寫死 hex，明暗主題才會自動跟著換。
+function limitLockBadge(lock) {
+  if (!lock) return '';
+  const cls = lock === 'up' ? 'lock-up' : 'lock-down';
+  const text = lock === 'up' ? '鎖漲停' : '鎖跌停';
+  return `<span class="qbadge ${cls}" title="五檔顯示單邊掛滿，可能鎖漲跌停——推估方法在這種情況下看不出主動買賣方向，淨流僅供參考，不代表今天沒有交易">${text}</span>`;
+}

@@ -241,6 +241,9 @@ select {
   font-size: 0.68rem; padding: 0.05rem 0.35rem;
   border-radius: 3px; margin-left: 0.4rem; white-space: nowrap;
 }
+/* 鎖漲跌停徽章走語意變數（跟象限色不同語意），明暗主題自動換色 */
+.qbadge.lock-up { color: var(--up); background: var(--up-soft); }
+.qbadge.lock-down { color: var(--down); background: var(--down-soft); }
 
 /* ---------- 表格 ---------- */
 

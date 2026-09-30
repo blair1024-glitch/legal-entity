@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from .calibrate import accuracy_summary
 from .config import Config
+from .flow import limit_lock_state
 from .quadrant import compute_quadrants, compute_trail, rank_stocks
 from .sectors import SectorMap
 from .sources.bsr import state_broker_summary
@@ -46,6 +47,18 @@ def resolve_date(store: Store, date: str | None) -> str:
     if date:
         return date
     return store.latest_flow_date() or now_taipei().date().isoformat()
+
+
+def _limit_locks(store: Store, trade_date: str) -> dict[str, str | None]:
+    """每檔目前是否鎖漲停／鎖跌停，供個股排行與自選股標示用.
+
+    讀 ``quote_state``（輪詢時存的每檔最新一筆五檔快照）——這是即時狀態，
+    不是 ``flow_minute`` 那種逐分鐘累積的歷史，鎖住的當下才有意義。
+    """
+    return {
+        code: limit_lock_state(row["bid1"], row["ask1"], row["price"])
+        for code, row in store.load_quote_state(trade_date).items()
+    }
 
 
 # ---------- 盤中 ----------
@@ -141,6 +154,9 @@ def stocks_view(
         # 看單一板塊時不做頭尾裁切——成分股本來就不多，全部列出來
         limit=0 if sector else limit,
     )
+    locks = _limit_locks(store, trade_date)
+    for s in ranked:
+        s["limit_lock"] = locks.get(s["code"])
     return {
         "trade_date": trade_date,
         "estimated": True,
@@ -173,6 +189,7 @@ def watchlist_view(store: Store, config: Config, *, date: str | None = None) -> 
 
     insti_date = store.latest_insti_date()
     insti = {r["code"]: r for r in store.insti_daily(insti_date)} if insti_date else {}
+    locks = _limit_locks(store, trade_date)
 
     out = []
     for code in codes:
@@ -186,6 +203,7 @@ def watchlist_view(store: Store, config: Config, *, date: str | None = None) -> 
                 "last_price": flow.get("last_price", 0.0),
                 "est_net_value": round(flow.get("net_value", 0.0), 2),
                 "foreign_ratio": ratios.get(code),
+                "limit_lock": locks.get(code),
                 "official": {
                     "trade_date": insti_date,
                     "foreign_net": official["foreign_net"] if official else None,

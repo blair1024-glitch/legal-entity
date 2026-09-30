@@ -179,6 +179,7 @@ async function loadStocks() {
   renderRankList(el, rows, {
     label: s => `${s.code} ${s.name || ''} <small>${s.sector}</small>`,
     value: s => s.net_value,
+    badge: s => limitLockBadge(s.limit_lock),
   });
 }
 
@@ -195,7 +196,7 @@ function watchlistRowHtml(it, { removable = false } = {}) {
     : '<td></td>';
   return `<tr>
     <td>${it.code}</td>
-    <td>${it.name || '—'}</td>
+    <td>${it.name || '—'}${limitLockBadge(it.limit_lock)}</td>
     <td class="muted">${it.sector}</td>
     <td class="num">${it.last_price ? it.last_price.toFixed(2) : '—'}</td>
     <td class="num ${signClass(it.est_net_value)}">${money(it.est_net_value)}</td>
@@ -230,6 +231,7 @@ function resolveFromSources(code, { stocks, lookup }) {
     last_price: stock ? stock.last_price : 0,
     est_net_value: stock ? stock.net_value : 0,
     foreign_ratio: meta ? meta.foreign_ratio : null,
+    limit_lock: stock ? stock.limit_lock : null,
     official: meta ? meta.official : {},
   };
 }

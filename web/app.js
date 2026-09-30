@@ -5,8 +5,8 @@
  * 出來——這樣就不會有某個畫面漏標的情況。
  *
  * 純渲染函式（money/lots/pct/signClass/renderQuadrant/renderRankList/
- * quadrantBadge/QUADRANT_COLORS）在 shared/render.js，本機版與 GitHub
- * Pages 靜態版共用，這裡只負責「資料從哪裡來」。
+ * quadrantBadge/limitLockBadge/QUADRANT_COLORS）在 shared/render.js，
+ * 本機版與 GitHub Pages 靜態版共用，這裡只負責「資料從哪裡來」。
  */
 
 const REFRESH_MS = 30000;
@@ -122,6 +122,7 @@ async function loadStocks() {
   renderRankList(el, data.stocks, {
     label: s => `${s.code} ${s.name || ''} <small>${s.sector}</small>`,
     value: s => s.net_value,
+    badge: s => limitLockBadge(s.limit_lock),
   });
 }
 
@@ -143,7 +144,7 @@ async function loadWatchlist() {
     const o = it.official || {};
     return `<tr>
       <td>${it.code}</td>
-      <td>${it.name || '—'}</td>
+      <td>${it.name || '—'}${limitLockBadge(it.limit_lock)}</td>
       <td class="muted">${it.sector}</td>
       <td class="num">${it.last_price ? it.last_price.toFixed(2) : '—'}</td>
       <td class="num ${signClass(it.est_net_value)}">${money(it.est_net_value)}</td>
