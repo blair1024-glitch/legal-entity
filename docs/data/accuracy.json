@@ -1,1 +1,1 @@
-{"available":false,"days":0}
+{"available":true,"days":1,"latest":{"trade_date":"2026-09-30","spearman":0.0,"sign_match":0.5614,"n_stocks":64},"mean_spearman":0.0,"mean_sign_match":0.5614,"history":[{"trade_date":"2026-09-30","spearman":0.0,"sign_match":0.5614,"n_stocks":64}]}
