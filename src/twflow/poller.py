@@ -11,6 +11,21 @@ MIS 的速率限制約 3 requests / 5 秒。上市＋上櫃約 1,800 檔，每�
 輪詢間隔越長，兩次快照之間累積的成交量越多，用「單一成交價」代表整段
 區間的誤差就越大。60 秒是資料涵蓋度與推估精度之間的折衷；只掃自選股時
 間隔可以縮到 5–10 秒，推估會明顯更準。
+
+## 某些環境（例如 GitHub Actions）命中率偏低，而且跟批次大小無關
+
+2026-10-02 實測發現：在 GitHub Actions runner 上，MIS 單次請求經常回 200、
+rtcode 正常、完全沒有錯誤訊息，但 ``msgArray`` 裡的檔數只有請求數的
+一成多——而且把 ``batch_size`` 從 50 縮到 10 之後，命中率幾乎沒變
+（都在 10-16% 之間），199 批裡每一批都缺、缺的比例也沒有隨批次大小
+變化。這代表瓶頸不是「單次請求帶太多檔」，比較像是這個來源 IP（雲端
+runner）被 MIS 用某種抽樣／降級方式對待，每一檔被成功回應的機率大概
+就是固定的一成多，跟怎麼切批次無關。
+
+既然縮小批次沒用，``poll_once`` 改成對同一輪裡還缺的檔案最多再補抓
+``poll.max_passes - 1`` 次——命中率如果真的是獨立的一成多，缺的檔案
+補兩輪大概可以把覆蓋率從 15% 拉到快 40%。這不是修好了「為什麼」，
+只是在不知道確切原因的情況下，用統計上站得住腳的方式盡量多要到幾檔。
 """
 
 from __future__ import annotations
@@ -37,6 +52,7 @@ class PollStats:
 
     requested: int = 0
     batches: int = 0
+    passes: int = 0
     quotes: int = 0
     increments: int = 0
     errors: list[str] = field(default_factory=list)
@@ -93,10 +109,47 @@ class Poller:
 
     # ---------- one round ----------
 
+    def _fetch_pass(
+        self, to_fetch: list[tuple[str, str]], batch_size: int, stats: PollStats, pass_num: int
+    ) -> tuple[list[Quote], list[tuple[str, str]]]:
+        """掃一輪（可能是補抓）的所有批次，回傳 (拿到的報價, 還缺的 code/market)."""
+        quotes_out: list[Quote] = []
+        still_missing: list[tuple[str, str]] = []
+        for batch in mis.batched(to_fetch, batch_size):
+            stats.batches += 1
+            try:
+                quotes = mis.fetch_batch(self.fetcher, batch)
+            except (FetchError, ParseError) as exc:
+                # 單一批次失敗不該中斷整輪——下一輪會補回來
+                stats.errors.append(f"第 {pass_num} 輪 批次 {stats.batches}: {exc}")
+                still_missing.extend(batch)
+                continue
+            # 診斷用：MIS 偶爾會整批回 200、rtcode 正常，但 msgArray 裡的
+            # 檔數比請求的少很多，而且沒有任何錯誤訊息可看。實測跟
+            # batch_size 無關（50 檔/批跟 10 檔/批命中率都在 10-16%），
+            # 逐批記下「請求幾檔、實際拿回幾檔」才看得出真實的缺量比例。
+            got = {q.code for q in quotes}
+            missing = [(c, m) for c, m in batch if c not in got]
+            if missing:
+                log.info(
+                    "第 %d 輪 批次 %d: 請求 %d 檔／拿回 %d 檔，缺 %d 檔（例如 %s）",
+                    pass_num, stats.batches, len(batch), len(quotes), len(missing),
+                    ", ".join(c for c, _ in missing[:5]),
+                )
+            quotes_out.extend(quotes)
+            still_missing.extend(missing)
+        return quotes_out, still_missing
+
     def poll_once(self, trade_date: str | None = None) -> PollStats:
-        """掃一輪 universe，把資金流增量寫進資料庫."""
+        """掃一輪 universe，把資金流增量寫進資料庫.
+
+        單一次掃描命中率可能只有一成多（見模組說明），所以對同一輪裡
+        還缺的檔案最多再補抓 ``poll.max_passes - 1`` 次——如果命中率是
+        獨立事件，補幾次下來能顯著拉高這一輪實際覆蓋到的檔數。
+        """
         trade_date = trade_date or now_taipei().date().isoformat()
         batch_size = int(self.config.get("poll.batch_size", 50))
+        max_passes = max(1, int(self.config.get("poll.max_passes", 3)))
         stats = PollStats()
 
         codes = self.universe()
@@ -106,28 +159,18 @@ class Poller:
         stats.requested = len(codes)
 
         all_quotes: list[Quote] = []
-        for batch in mis.batched(codes, batch_size):
-            stats.batches += 1
-            try:
-                quotes = mis.fetch_batch(self.fetcher, batch)
-            except (FetchError, ParseError) as exc:
-                # 單一批次失敗不該中斷整輪——下一輪會補回來
-                stats.errors.append(f"批次 {stats.batches}: {exc}")
-                continue
-            # 診斷用：MIS 偶爾會整批回 200、rtcode 正常，但 msgArray 裡的
-            # 檔數比請求的少很多，而且沒有任何錯誤訊息可看——實測一輪 40
-            # 批、50 檔/批，最後只拿回不到 15% 的報價。這裡把「請求幾檔、
-            # 實際拿回幾檔」逐批記下來，才看得出是固定上限（每批都差不多
-            # 數量）還是忽大忽小（比較像限流或其他原因）。
-            got = {q.code for q in quotes}
-            missing = [c for c, _ in batch if c not in got]
-            if missing:
-                log.info(
-                    "批次 %d: 請求 %d 檔／拿回 %d 檔，缺 %d 檔（例如 %s）",
-                    stats.batches, len(batch), len(quotes), len(missing),
-                    ", ".join(missing[:5]),
-                )
+        to_fetch = codes
+        for pass_num in range(1, max_passes + 1):
+            if not to_fetch:
+                break
+            stats.passes = pass_num
+            quotes, to_fetch = self._fetch_pass(to_fetch, batch_size, stats, pass_num)
             all_quotes.extend(quotes)
+            if to_fetch and pass_num < max_passes:
+                log.info(
+                    "第 %d 輪結束：累計拿到 %d／%d 檔，還缺 %d 檔，準備補抓",
+                    pass_num, len(all_quotes), stats.requested, len(to_fetch),
+                )
 
         stats.quotes = len(all_quotes)
         if not all_quotes:
@@ -185,10 +228,13 @@ class Poller:
 
             stats = self.poll_once(trade_date)
             log.info(
-                "輪詢完成: 請求 %d 檔 / %d 批 / 拿回 %d 檔報價 / %d 筆增量%s",
+                "輪詢完成: 請求 %d 檔 / %d 輪 %d 批 / 拿回 %d 檔報價"
+                "（命中率 %.0f%%）/ %d 筆增量%s",
                 stats.requested,
+                stats.passes,
                 stats.batches,
                 stats.quotes,
+                100.0 * stats.quotes / stats.requested if stats.requested else 0.0,
                 stats.increments,
                 f" / {len(stats.errors)} 個錯誤" if stats.errors else "",
             )
