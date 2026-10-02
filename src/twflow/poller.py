@@ -35,6 +35,7 @@ log = logging.getLogger(__name__)
 class PollStats:
     """單輪輪詢的結果，供 CLI 與診斷輸出."""
 
+    requested: int = 0
     batches: int = 0
     quotes: int = 0
     increments: int = 0
@@ -102,6 +103,7 @@ class Poller:
         if not codes:
             stats.errors.append("universe 是空的——請先執行 `twflow sync` 匯入證券清單")
             return stats
+        stats.requested = len(codes)
 
         all_quotes: list[Quote] = []
         for batch in mis.batched(codes, batch_size):
@@ -112,6 +114,19 @@ class Poller:
                 # 單一批次失敗不該中斷整輪——下一輪會補回來
                 stats.errors.append(f"批次 {stats.batches}: {exc}")
                 continue
+            # 診斷用：MIS 偶爾會整批回 200、rtcode 正常，但 msgArray 裡的
+            # 檔數比請求的少很多，而且沒有任何錯誤訊息可看——實測一輪 40
+            # 批、50 檔/批，最後只拿回不到 15% 的報價。這裡把「請求幾檔、
+            # 實際拿回幾檔」逐批記下來，才看得出是固定上限（每批都差不多
+            # 數量）還是忽大忽小（比較像限流或其他原因）。
+            got = {q.code for q in quotes}
+            missing = [c for c, _ in batch if c not in got]
+            if missing:
+                log.info(
+                    "批次 %d: 請求 %d 檔／拿回 %d 檔，缺 %d 檔（例如 %s）",
+                    stats.batches, len(batch), len(quotes), len(missing),
+                    ", ".join(missing[:5]),
+                )
             all_quotes.extend(quotes)
 
         stats.quotes = len(all_quotes)
@@ -170,7 +185,8 @@ class Poller:
 
             stats = self.poll_once(trade_date)
             log.info(
-                "輪詢完成: %d 批 / %d 檔報價 / %d 筆增量%s",
+                "輪詢完成: 請求 %d 檔 / %d 批 / 拿回 %d 檔報價 / %d 筆增量%s",
+                stats.requested,
                 stats.batches,
                 stats.quotes,
                 stats.increments,
