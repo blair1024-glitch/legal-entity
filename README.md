@@ -405,7 +405,9 @@ macOS 用 launchd、或直接 `tmux new -s twflow 'twflow auto'` 也可以——
    `config.yaml`、你自己的自選股清單本來就在 `.gitignore` 排除；資料庫裡
    也只有從公開資料源算出的公開市場數據，沒有新的洩漏面。
 2. **啟用 Pages**（Settings → Pages → Source 選 `Deploy from a branch`，
-   分支選 `main`，資料夾選 `/docs`）
+   分支選**你實際開發用的那條分支**（這個 repo 目前是
+   `claude/institutional-trading-activity-216ad6`，不是 `main`——這個 repo
+   根本沒有 `main` 分支，選錯會整個連不上），資料夾選 `/docs`）
 3. **手動跑第一次**（Actions 分頁 → `twflow · 盤後` → Run workflow）——
    這一步會順便把證券清單種進 `data-state` 分支，之後排程才有意義。
    跑完後幾分鐘，`https://<你的 GitHub 帳號>.github.io/<repo 名稱>/`
@@ -422,6 +424,60 @@ macOS 用 launchd、或直接 `tmux new -s twflow 'twflow auto'` 也可以——
 | 需要開機 | 是 | 否 |
 | 券商分點（官股動向） | 支援（手動匯入 CSV） | 不支援——Actions 環境沒有人可以手動下載驗證碼保護的 CSV |
 | 圖表庫來源 | 本機 vendor（離線可用） | CDN（jsdelivr，需要網路） |
+
+### 排程在盤中幾乎不會自己觸發——改用外部觸發器
+
+**已知限制，不是這個專案的 bug：** 實測 2026-09-30 到 10-06 共四個交易日，
+`twflow-poll.yml` 的 `schedule:` 排程在 09:00–13:30 的交易時段裡**一次都
+沒有自己觸發過**——每次真正觸發都落在收盤後 1～7 小時，`盤後` 排程
+（名義上 16:10／16:40）也有同樣現象，實測延遲穩定落在 6.5～7.25 小時。
+這是 GitHub Actions 官方文件本身就說明的行為：高頻排程在系統負載高的
+時段會被延遲甚至直接跳過，帳號等級越低碰到的機率越高。縮短 cron 間隔
+（5 分鐘→15 分鐘）、放寬批次大小都沒有改善這個問題本身——那些調整解決的
+是「排程真的觸發時能抓到多少檔」，不是「排程會不會準時觸發」，兩者是
+不同的瓶頸。
+
+**解法：用一個外部排程服務，定時呼叫 GitHub API 觸發
+`workflow_dispatch`**，完全繞過 GitHub 自己不可靠的 `schedule:`。
+`workflow_dispatch` 跟 `schedule` 觸發的是同一份 workflow、同一個
+`twflow poll --once`，差別只在誰、怎麼按下「執行」這個按鈕。
+
+1. **產生一個權限最小的 token**：GitHub 右上角頭像 → Settings →
+   Developer settings → **Fine-grained personal access tokens** →
+   Generate new token。
+   - Repository access：選 **Only select repositories**，只勾這個 repo
+     ——不要給整個帳號的存取權
+   - Permissions → **Actions**：改成 **Read and write**（這是唯一需要的
+     權限，用來觸發 workflow；不需要 Contents、不需要其他任何權限）
+   - 產生後把 token 存好，之後只會顯示這一次
+2. **找一個免費的外部排程服務**，例如 [cron-job.org](https://cron-job.org)
+   （免費、支援自訂 HTTP method／headers／body、分鐘級排程）。註冊帳號、
+   建立一個新的 cron job，設定：
+   - **URL**：
+     `https://api.github.com/repos/blair1024-glitch/legal-entity/actions/workflows/twflow-poll.yml/dispatches`
+   - **Method**：`POST`
+   - **Headers**：
+     ```
+     Authorization: Bearer <你產生的 token>
+     Accept: application/vnd.github+json
+     Content-Type: application/json
+     X-GitHub-Api-Version: 2022-11-28
+     ```
+   - **Body**：`{"ref": "claude/institutional-trading-activity-216ad6"}`
+   - **排程**：只在台北時間 09:00–13:30、週一到週五執行，間隔看該服務
+     支援到多細（大部分免費方案支援到 5 分鐘，部分到 1 分鐘）——間隔抓
+     5 分鐘是穩妥的起點，不用比這個更密：`concurrency: group: twflow-state`
+     會讓重疊的觸發排隊而不是互相取消，密度太高只會讓 run 堆積，不會
+     讓資料更即時。記得把服務的時區設定成 `Asia/Taipei`，大部分免費
+     排程服務預設是 UTC，算錯時區等於白設定。
+3. **保留原本的 `schedule:` 不要刪**——外部觸發器是主要路徑，原生排程
+   當備援：萬一哪天 GitHub 自己的排程真的準時觸發了，當成多一輪免費的
+   補抓，不衝突也沒有壞處。
+
+設定完成後驗證：等下一個交易時段過去，回來看 repo 的 Actions 分頁，
+`twflow · 盤中輪詢` 應該會看到大量 `workflow_dispatch` 事件的 run、而且
+時間戳落在交易時段**裡面**而不是收盤後——這才代表外部觸發器真的在穩定
+運作。
 
 ### 「這個網頁目前顯示的還不是真實資料」
 
@@ -448,8 +504,8 @@ runner（Azure 代管）連不連得上這些站台，在合併這個功能前�
 repo 裡會多一個 `data-state` 分支，看起來很奇怪但是預期的：四象限與輪動
 軌跡需要整個交易日的盤中資料累積，不是單一時間點，所以 Actions 每次執行
 之間要有辦法接續前一輪的資料庫。由於 Actions 每次都是全新環境，這個累積
-用的 SQLite 資料庫就放在這個獨立分支（路徑 `state/twflow.db`），跟 `main`
-分支的原始碼、跟本機 Mac 版的 `data/twflow.db`（`.gitignore` 排除）完全
+用的 SQLite 資料庫就放在這個獨立分支（路徑 `state/twflow.db`），跟原始碼
+所在的開發分支、跟本機 Mac 版的 `data/twflow.db`（`.gitignore` 排除）完全
 是兩回事——**這條分支是給機器讀寫的，不需要人去看它**，也不會出現在
 你本機 `git pull` 的內容裡（除非你自己 `git checkout data-state`）。
 
