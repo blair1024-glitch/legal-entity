@@ -60,9 +60,39 @@ class TestLimitLockState:
     def test_normal_two_sided_book_is_not_locked(self):
         assert limit_lock_state(bid1=999.0, ask1=1001.0, price=1000.0) is None
 
-    def test_both_sides_empty_is_not_locked(self):
-        # 盤前還沒開始撮合，兩邊都是 0——這不是鎖漲跌停，是還沒開盤
+    def test_both_sides_empty_pre_market_is_not_locked(self):
+        # 盤前還沒開始撮合，兩邊都是 0、成交量也是 0——這不是鎖漲跌停，
+        # 是還沒開盤
         assert limit_lock_state(bid1=0.0, ask1=0.0, price=0.0) is None
+
+    def test_both_sides_empty_without_prev_price_stays_unknown(self):
+        # 兩邊都是 0，但已經有成交量——實測過和碩鎖死到連排隊的買方都不
+        # 顯示出來，MIS 直接回兩邊皆 0。沒有昨收可以比較的話，寧可保守
+        # 回 None，不要亂猜方向。
+        assert limit_lock_state(bid1=0.0, ask1=0.0, price=98.5, cum_volume=30000.0) is None
+
+    def test_both_sides_empty_above_prev_price_is_locked_up(self):
+        assert (
+            limit_lock_state(
+                bid1=0.0, ask1=0.0, price=98.5, cum_volume=30000.0, prev_price=89.8
+            )
+            == "up"
+        )
+
+    def test_both_sides_empty_below_prev_price_is_locked_down(self):
+        assert (
+            limit_lock_state(
+                bid1=0.0, ask1=0.0, price=80.0, cum_volume=30000.0, prev_price=89.8
+            )
+            == "down"
+        )
+
+    def test_both_sides_empty_with_zero_cum_volume_ignores_prev_price(self):
+        # 有昨收可比對，但今天累積量還是 0——還是盤前，不該被當成鎖死
+        assert (
+            limit_lock_state(bid1=0.0, ask1=0.0, price=98.5, cum_volume=0.0, prev_price=89.8)
+            is None
+        )
 
     def test_invalid_price_is_not_locked(self):
         assert limit_lock_state(bid1=110.0, ask1=0.0, price=0.0) is None

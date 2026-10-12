@@ -137,6 +137,18 @@ class TestTpexInsti:
         with pytest.raises(ParseError, match="預期 JSON 陣列"):
             tpex_insti.parse('{"stat":"OK"}')
 
+    def test_unrecognized_field_names_raise_rather_than_silently_zeroing(self):
+        # 實測過的真實情況：候選鍵名跟櫃買 OpenAPI 實際欄位對不上時，
+        # _pick 全部回 None，to_float(None) 又悄悄變成 0.0——結果是看起來
+        #「成功」、筆數正常，但每一檔的三大法人數字全部是假的零。這裡要
+        # 確保這種全部比對不到的情況會直接炸出來，而不是繼續往下寫假資料。
+        body = json.dumps([{
+            "SecuritiesCompanyCode": "6488", "CompanyName": "環球晶",
+            "SomeFutureFieldName": "1,000", "AnotherRenamedColumn": "500",
+        }])
+        with pytest.raises(ParseError, match="欄位比對失敗"):
+            tpex_insti.parse(body)
+
 
 # ---------------------------------------------------------------- 產業別
 

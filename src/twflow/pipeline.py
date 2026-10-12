@@ -126,9 +126,14 @@ def run_eod(
             lambda: store.upsert_broker_branch(bsr.load_directory()),
         )
 
-    # 非交易日的話，把它記起來讓後續統計自動跳過
+    # 非交易日的話，把它記起來讓後續統計自動跳過。證交所對非交易日／
+    # 日期太舊的查詢，有時錯誤訊息會明確寫「非交易日」，有時只回通用的
+    # 「很抱歉，沒有符合條件的資料」（twse_common.extract_table 原樣
+    # 轉述 stat 欄位）——兩種都要能識別，否則像國定假日補假這種情況，
+    # 會被誤記成抓取失敗而不是正常的非交易日，隔天也不會重試。
+    NON_TRADING_HINTS = ("非交易日", "沒有符合條件的資料")
     insti_step = next((s for s in report.steps if "三大法人買賣超" in s.name), None)
-    if insti_step and not insti_step.ok and "非交易日" in insti_step.detail:
+    if insti_step and not insti_step.ok and any(h in insti_step.detail for h in NON_TRADING_HINTS):
         mark_non_trading_day(day)
 
     report.add("校準推估值", lambda: _calibrate(store, day))

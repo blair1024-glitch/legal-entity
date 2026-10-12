@@ -73,10 +73,26 @@ def parse(text: str) -> list[dict]:
         if not is_common_stock(code):
             continue
 
-        foreign = to_float(_pick(entry, FOREIGN_KEYS))
-        trust = to_float(_pick(entry, TRUST_KEYS))
-        dealer = to_float(_pick(entry, DEALER_KEYS))
+        foreign_raw = _pick(entry, FOREIGN_KEYS)
+        trust_raw = _pick(entry, TRUST_KEYS)
+        dealer_raw = _pick(entry, DEALER_KEYS)
         total_raw = _pick(entry, TOTAL_KEYS)
+        if foreign_raw is trust_raw is dealer_raw is total_raw is None:
+            # 外資／投信／自營商／合計四個候選鍵一個都沒對到——不是「今天
+            # 剛好買賣超是 0」（那樣至少會比對到字串 "0"），是櫃買把欄位
+            # 名稱改了。悄悄把這種情況寫成 0 會讓一整天的上櫃官方數字
+            # 變成假的零，而且筆數看起來還是「成功」，所以在這裡直接炸出
+            # 來，順便印出這一筆實際有的欄位名，方便對照修正候選鍵清單。
+            raise ParseError(
+                SOURCE,
+                "欄位比對失敗（外資／投信／自營商／合計四個候選鍵都沒對到），"
+                "可能是上游欄位改名了",
+                observed=sorted(entry.keys()),
+            )
+
+        foreign = to_float(foreign_raw)
+        trust = to_float(trust_raw)
+        dealer = to_float(dealer_raw)
         total = to_float(total_raw) if total_raw is not None else foreign + trust + dealer
 
         out.append(

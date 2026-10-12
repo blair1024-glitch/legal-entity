@@ -14,6 +14,7 @@ from twflow.config import Config
 from twflow.httpclient import Fetcher
 from twflow.pipeline import run_eod, sync_securities
 from twflow.store import Store
+from twflow.tradingcal import previous_trading_day
 
 DAY = dt.date(2026, 8, 27)
 
@@ -96,6 +97,30 @@ class TestStocksView:
         out = views.stocks_view(store, config, date=DAY.isoformat())
         row = next(s for s in out["stocks"] if s["code"] == "2330")
         assert row["limit_lock"] is None
+
+    def test_flags_limit_up_lock_when_book_is_fully_empty_but_trading(self, store, config, fetcher):
+        # 實測過的真實情況（和碩 2026-10-12）：鎖死到連排隊的買方都不顯示，
+        # MIS 回的 bid1/ask1 兩邊皆 0，但累積量持續增加代表確實在成交。
+        # 這種情況要靠前一交易日收盤價才能判斷方向。
+        sync_securities(store, fetcher, ["TWSE"])
+        prev_day = previous_trading_day(DAY)
+        store.add_flow_minute([
+            {"trade_date": prev_day.isoformat(), "code": "2330",
+             "minute_ts": f"{prev_day.isoformat()}T13:25:00", "net_value": 0.0,
+             "turnover_value": 1000.0, "last_price": 89.8},
+        ])
+        store.add_flow_minute([
+            {"trade_date": DAY.isoformat(), "code": "2330",
+             "minute_ts": "2026-08-27T09:07:00", "net_value": 0.0,
+             "turnover_value": 1000.0, "last_price": 98.6},
+        ])
+        store.save_quote_state([
+            {"code": "2330", "trade_date": DAY.isoformat(), "ts": "2026-08-27T09:20:00",
+             "price": 98.6, "cum_volume": 29579.0, "bid1": 0.0, "ask1": 0.0},
+        ])
+        out = views.stocks_view(store, config, date=DAY.isoformat())
+        row = next(s for s in out["stocks"] if s["code"] == "2330")
+        assert row["limit_lock"] == "up"
 
     def test_no_quote_state_row_yields_no_lock_not_an_error(self, store, config, fetcher):
         # 沒輪詢到五檔（例如重啟後第一筆、或這檔今天沒被輪詢器看過）

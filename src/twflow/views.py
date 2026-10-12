@@ -12,6 +12,8 @@ JSON 形狀。若兩邊各自維護一份組裝邏輯，日後有人幫某個 en
 
 from __future__ import annotations
 
+import datetime as dt
+
 from .calibrate import accuracy_summary
 from .config import Config
 from .flow import limit_lock_state
@@ -19,7 +21,7 @@ from .quadrant import compute_quadrants, compute_trail, rank_stocks
 from .sectors import SectorMap
 from .sources.bsr import state_broker_summary
 from .store import Store
-from .tradingcal import is_session_open, now_taipei
+from .tradingcal import is_session_open, now_taipei, previous_trading_day
 
 INTRADAY_DISCLAIMER = (
     "盤中資金流為推估值，非官方法人買賣超。台股沒有公開的盤中法人資料，"
@@ -54,10 +56,36 @@ def _limit_locks(store: Store, trade_date: str) -> dict[str, str | None]:
 
     讀 ``quote_state``（輪詢時存的每檔最新一筆五檔快照）——這是即時狀態，
     不是 ``flow_minute`` 那種逐分鐘累積的歷史，鎖住的當下才有意義。
+
+    五檔兩邊都回報 0 但其實已經在成交（鎖死到連排隊的一邊都不顯示）時，
+    要靠前一個交易日的收盤價才能判斷鎖的是漲停還是跌停。``quote_state``
+    每檔只留最新一筆（給輪詢器當「上次快照」用），今天輪詢一開始就會把
+    昨天的那一筆蓋掉，所以沒辦法從這裡拿到昨收——改從 ``flow_minute``
+    撈前一交易日最後一筆的 ``last_price`` 當收盤價，那張表是按日期分列
+    累積的，不會被覆蓋。
+
+    ``previous_trading_day`` 只看得到使用者維護的 ``holidays.txt``；如果
+    緊鄰的那天其實是還沒被記錄過的國定假日（例如補假，當天完全沒有
+    flow_minute 資料），就再往前多試幾天，而不是直接放棄比對。
     """
+    rows = store.load_quote_state(trade_date)
+    cur_day = dt.date.fromisoformat(trade_date)
+    prev_prices: dict[str, float] = {}
+    for _ in range(5):
+        cur_day = previous_trading_day(cur_day)
+        for r in store.flow_rows(cur_day.isoformat()):
+            prev_prices[r["code"]] = r["last_price"]
+        if prev_prices:
+            break
     return {
-        code: limit_lock_state(row["bid1"], row["ask1"], row["price"])
-        for code, row in store.load_quote_state(trade_date).items()
+        code: limit_lock_state(
+            row["bid1"],
+            row["ask1"],
+            row["price"],
+            cum_volume=row["cum_volume"],
+            prev_price=prev_prices.get(code),
+        )
+        for code, row in rows.items()
     }
 
 

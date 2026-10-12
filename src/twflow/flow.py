@@ -48,7 +48,14 @@ class Quote:
         return self.bid1 > 0 and self.ask1 > 0 and self.ask1 >= self.bid1
 
 
-def limit_lock_state(bid1: float, ask1: float, price: float) -> str | None:
+def limit_lock_state(
+    bid1: float,
+    ask1: float,
+    price: float,
+    *,
+    cum_volume: float = 0.0,
+    prev_price: float | None = None,
+) -> str | None:
     """判斷五檔是不是「鎖漲停／鎖跌停」的單邊狀態.
 
     鎖漲停：買方排隊掛滿（bid1 > 0），賣方完全沒人掛（ask1 <= 0）。
@@ -57,7 +64,11 @@ def limit_lock_state(bid1: float, ask1: float, price: float) -> str | None:
     中性、淨流卡在 0。這不是推估失敗，是這個方法在這個情境下本來就看不出
     方向，值得在畫面上另外標示，而不是讓使用者誤以為「這檔今天沒動靜」。
 
-    兩邊皆為 0（例如盤前還沒開始撮合）不算鎖漲跌停，回傳 None。
+    兩邊皆為 0 有兩種可能：盤前還沒開始撮合（``cum_volume`` 也是 0，
+    這時回傳 None），或是鎖死到連排隊中的那一邊 MIS 都不回報、但實際上
+    早就在成交（``cum_volume`` > 0）——這種情況書面本身看不出方向，要靠
+    「現價相對昨收」才能分辨鎖的是漲停還是跌停，所以需要呼叫端額外帶
+    ``prev_price``；沒帶的話維持原本保守的 None，不亂猜方向。
     """
     if price <= 0:
         return None
@@ -65,6 +76,11 @@ def limit_lock_state(bid1: float, ask1: float, price: float) -> str | None:
         return "up"
     if ask1 > 0 and bid1 <= 0:
         return "down"
+    if bid1 <= 0 and ask1 <= 0 and cum_volume > 0 and prev_price:
+        if price > prev_price:
+            return "up"
+        if price < prev_price:
+            return "down"
     return None
 
 
