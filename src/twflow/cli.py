@@ -26,7 +26,7 @@ from .config import Config
 from .errors import TwflowError
 from .httpclient import Fetcher
 from .store import Store
-from .tradingcal import previous_trading_day, today_taipei
+from .tradingcal import target_eod_day, today_taipei
 
 
 def _log_setup(verbose: bool) -> None:
@@ -46,9 +46,7 @@ def _fetcher(config: Config, mode_override: str | None = None) -> Fetcher:
 
 def _parse_date(value: str | None) -> dt.date:
     if not value:
-        # 預設抓「上一個交易日」——當日盤後資料要 15:00 後才有，
-        # 直接預設今天在盤中執行只會拿到空資料。
-        return previous_trading_day(today_taipei() + dt.timedelta(days=1))
+        return target_eod_day()
     return dt.date.fromisoformat(value)
 
 

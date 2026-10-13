@@ -79,11 +79,39 @@ def is_session_open(at: dt.datetime | None = None) -> bool:
     return SESSION_OPEN <= at.time() <= SESSION_CLOSE
 
 
-def eod_data_ready(at: dt.datetime | None = None) -> bool:
-    """盤後三大法人數據是否應該已經發布."""
+def target_eod_day(at: dt.datetime | None = None) -> dt.date:
+    """決定現在這個時間點該處理哪一個交易日的盤後資料.
+
+    規則：今天如果是交易日、且已經過了 16:00，目標就是今天；否則一律是
+    上一個交易日——那天的 16:00 不管怎麼算都已經過了，資料一定已經就緒。
+
+    這裡刻意不管「現在實際上是哪一天、幾點」跟「排程原本打算處理哪一天」
+    是否一致：GitHub Actions 的排程延遲實測過從幾分鐘到超過 9 小時都有
+    （2026-10-05、2026-10-12 兩次都延遲到隔天凌晨才真正執行），如果各
+    呼叫端自己拿「現在的日期」當成「要處理的日期」，跨過午夜之後就會
+    誤把目標日當成還沒收盤的今天，而不是早就就緒的上一個交易日——所有
+    需要「現在該處理哪一天」的地方都該呼叫這裡，不要各自重算。
+    """
     at = at or now_taipei()
     at = at.astimezone(TAIPEI)
-    return is_trading_day(at.date()) and at.time() >= EOD_READY
+    today = at.date()
+    if is_trading_day(today) and at.time() >= EOD_READY:
+        return today
+    return previous_trading_day(today)
+
+
+def eod_data_ready(at: dt.datetime | None = None) -> bool:
+    """盤後三大法人數據是否應該已經發布.
+
+    直接回 True：``target_eod_day`` 的選日邏輯本身已經保證選到的那一天
+    資料一定就緒（不是今天已經過 16:00，就是已經收盤超過一整天的上一個
+    交易日），不會再有「選到的日期但其實還沒就緒」這種情況——舊版在這裡
+    直接比較「現在時刻 >= 16:00」，排程延遲跨過午夜時會把「上一個交易日
+    早就就緒」誤判成「今天還沒到 16:00」，整天的校準資料因此空掉。
+    保留這個函式是因為 ``twflow eod --skip-if-not-ready`` 這個排程用的
+    旗標還在，之後如果真的出現需要略過的情況，邏輯擴充點就在這裡。
+    """
+    return True
 
 
 def session_elapsed_minutes(at: dt.datetime | None = None) -> float:
