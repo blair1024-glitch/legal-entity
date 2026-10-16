@@ -38,26 +38,57 @@ runs:
         git -C state config user.name "github-actions[bot]"
         git -C state config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+    # 實測發現（2026-10-16）：concurrency: twflow-state 理論上序列化
+    # poll/eod/compact-state 三個 workflow，但 cron-job.org 每 5 分鐘
+    # 密集觸發之下，仍然實測到約 1 成的 push 被拒絕（fetch first——
+    # 代表另一個 job 剛好在這次 checkout 之後、push 之前，搶先推上去）。
+    # 這兩份都是純產生出來的檔案（JSON／複製自 web/、SQLite），沒有
+    # 「使用者手寫內容」需要小心合併，所以用「失敗就重新整理到最新、
+    # 重新 commit 再推」這種簡單重試，而不是放著整輪資料直接丟失。
     - name: 發布靜態資料到 main
       shell: bash
       run: |
         set -e
-        git add docs/data docs/style.css docs/shared/render.js docs/favicon.svg
-        if git diff --cached --quiet; then
-          echo "docs/ 沒有變動，略過 commit"
-        else
+        for attempt in 1 2 3 4 5; do
+          git add docs/data docs/style.css docs/shared/render.js docs/favicon.svg
+          if git diff --cached --quiet; then
+            echo "docs/ 沒有變動，略過 commit"
+            break
+          fi
           git commit -q -m "chore: 更新儀表板靜態資料 [skip ci]"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
-        fi
+          if git push origin "HEAD:${GITHUB_REF_NAME}"; then
+            break
+          fi
+          if [ "$attempt" -eq 5 ]; then
+            echo "推送重試 5 次都被拒絕，放棄這一輪（下一輪會再帶著最新資料重新產生）"
+            exit 1
+          fi
+          echo "推送被拒絕（第 $attempt 次），可能跟其他執行中的 job 衝突——重新整理到最新再試一次"
+          git fetch origin "${GITHUB_REF_NAME}"
+          git reset --soft "origin/${GITHUB_REF_NAME}"
+          sleep "$((attempt * 3))"
+        done
 
     - name: 發布累積資料庫到 data-state
       shell: bash
       run: |
         set -e
-        git -C state add -A
-        if git -C state diff --cached --quiet; then
-          echo "state/twflow.db 沒有變動，略過 commit"
-        else
+        for attempt in 1 2 3 4 5; do
+          git -C state add -A
+          if git -C state diff --cached --quiet; then
+            echo "state/twflow.db 沒有變動，略過 commit"
+            break
+          fi
           git -C state commit -q -m "chore: 更新累積資料庫 [skip ci]"
-          git -C state push origin HEAD:data-state
-        fi
+          if git -C state push origin HEAD:data-state; then
+            break
+          fi
+          if [ "$attempt" -eq 5 ]; then
+            echo "推送重試 5 次都被拒絕，放棄這一輪（下一輪會再帶著最新資料重新產生）"
+            exit 1
+          fi
+          echo "推送被拒絕（第 $attempt 次），可能跟其他執行中的 job 衝突——重新整理到最新再試一次"
+          git -C state fetch origin data-state
+          git -C state reset --soft origin/data-state
+          sleep "$((attempt * 3))"
+        done
